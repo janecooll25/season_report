@@ -7,42 +7,39 @@ from yandex_report.report_data import DataBlock, collect, default_season
 from yandex_report.structure import SECTIONS
 
 
-def _cmp(rows):
-    """Оборачивает строки в comparison-формат: metrics=[[A],[B]]."""
-    return {"data": [
-        {"dimensions": [{"name": n}], "metrics": [[cur], [prev]]}
-        for n, cur, prev in rows
-    ]}
+# (название, значение текущего сезона, значение прошлого) по dimension.
+_DATA = {
+    "regionCountry": [("Россия", 900, 850), ("Беларусь", 100, 120)],
+    "regionCity": [("Москва", 500, 480)],
+    "ageInterval": [("25-34", 400, 380)],
+    "gender": [("Мужской", 700, 690)],
+    "interest": [("Финансы", 362, 350)],
+    "lastSocialNetwork": [("ВКонтакте", 120, 100)],
+    "lastTrafficSource": [("Поисковые системы", 600, 610)],
+    "deviceCategory": [("Смартфоны", 650, 600)],
+    "operatingSystem": [("Android", 500, 470)],
+}
+_SUMMARY = {
+    "cur": [1000, 800, 3000, 25.5, 130.0, 3.0],
+    "prev": [900, 750, 2800, 27.0, 125.0, 2.9],
+}
 
 
 class FakeClient:
-    """Замоканный клиент Метрики: comparison-ответы (текущий/прошлый сезон)."""
+    """Замоканный клиент Метрики: разные значения по году периода (d1)."""
 
     counter_id = "12345678"
 
-    def query_comparison(self, metrics, dimensions, a1, a2, b1, b2,
-                         *, limit=100, sort=None, filters=None):
-        if dimensions is None:  # сводка: totals=[[A],[B]]
-            return {"totals": [[1000, 800, 3000, 25.5, 130.0, 3.0],
-                               [900, 750, 2800, 27.0, 125.0, 2.9]]}
-        if "regionCountry" in dimensions:
-            return _cmp([("Россия", 900, 850), ("Беларусь", 100, 120)])
-        if "regionCity" in dimensions:
-            return _cmp([("Москва", 500, 480)])
-        if "ageInterval" in dimensions:
-            return _cmp([("25-34", 400, 380)])
-        if "gender" in dimensions:
-            return _cmp([("Мужской", 700, 690)])
-        if "interest" in dimensions:
-            return _cmp([("Финансы", 362, 350)])
-        if "lastSocialNetwork" in dimensions:
-            return _cmp([("ВКонтакте", 120, 100)])
-        if "lastTrafficSource" in dimensions:
-            return _cmp([("Поисковые системы", 600, 610)])
-        if "deviceCategory" in dimensions:
-            return _cmp([("Смартфоны", 650, 600)])
-        if "operatingSystem" in dimensions:
-            return _cmp([("Android", 500, 470)])
+    def query(self, metrics, dimensions, d1, d2, *, limit=100, sort=None, filters=None):
+        cur = d1.startswith("2024")  # текущий сезон vs прошлый
+        if dimensions is None:
+            return {"totals": _SUMMARY["cur"] if cur else _SUMMARY["prev"]}
+        for frag, rows in _DATA.items():
+            if frag in dimensions:
+                idx = 1 if cur else 2
+                return {"data": [
+                    {"dimensions": [{"name": r[0]}], "metrics": [r[idx]]} for r in rows
+                ]}
         return {"data": []}
 
 
