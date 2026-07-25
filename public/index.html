@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Отчёт КХЛ по интернет-аудитории</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --fg: #1a1d21; --muted: #6b7280;
+      --border: #e2e5ea; --accent: #0b5cad; --accent-fg: #ffffff;
+      --err-bg: #fdecec; --err-fg: #a51c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171c; --card: #1e2229; --fg: #e8eaed; --muted: #9aa0a6;
+        --border: #313640; --accent: #3b82f6; --accent-fg: #ffffff;
+        --err-bg: #3a1e1e; --err-fg: #f3a3a3;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 520px; background: var(--card);
+      border: 1px solid var(--border); border-radius: 14px; padding: 28px 26px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.06);
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+    input[type=date], input[type=text] {
+      width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px;
+    }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    .check { display: flex; align-items: center; gap: 9px; margin-top: 18px; font-size: 14px; }
+    .check input { width: 16px; height: 16px; }
+    button {
+      width: 100%; margin-top: 22px; padding: 12px; border: 0; border-radius: 9px;
+      background: var(--accent); color: var(--accent-fg); font-size: 15px;
+      font-weight: 600; cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: default; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .msg { margin-top: 16px; padding: 11px 13px; border-radius: 8px; font-size: 13px; display: none; }
+    .msg.err { display: block; background: var(--err-bg); color: var(--err-fg); }
+    .msg.ok { display: block; background: rgba(11,92,173,.1); color: var(--accent); }
+    .spin {
+      display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.4);
+      border-top-color: #fff; border-radius: 50%; animation: r .7s linear infinite;
+      vertical-align: -2px; margin-right: 7px;
+    }
+    @keyframes r { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Отчёт КХЛ по интернет-аудитории</h1>
+    <p class="sub">Данные из Яндекс.Метрики, аналитический текст — Claude. Результат в формате .docx.</p>
+
+    <form id="f">
+      <div class="row">
+        <div>
+          <label for="from">Начало периода</label>
+          <input type="date" id="from" required />
+        </div>
+        <div>
+          <label for="to">Конец периода</label>
+          <input type="date" id="to" required />
+        </div>
+      </div>
+
+      <label for="season">Метка сезона</label>
+      <input type="text" id="season" placeholder="2024/2025" />
+      <p class="hint">Подставляется в заголовки. По умолчанию — по годам периода.</p>
+
+      <label class="check">
+        <input type="checkbox" id="llm" checked />
+        Сгенерировать аналитический текст (Claude)
+      </label>
+      <p class="hint">Без галочки — быстрый черновик: только заголовки и таблицы.</p>
+
+      <button type="submit" id="btn">Сформировать отчёт</button>
+    </form>
+
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <script>
+    // По умолчанию — текущий сезон КХЛ (1 июля — 30 июня).
+    (function () {
+      const now = new Date();
+      const y = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear();
+      document.getElementById('from').value = (y - 1) + '-07-01';
+      document.getElementById('to').value = y + '-06-30';
+    })();
+
+    const form = document.getElementById('f');
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.className = 'msg';
+      const from = document.getElementById('from').value;
+      const to = document.getElementById('to').value;
+      const season = document.getElementById('season').value.trim();
+      const llm = document.getElementById('llm').checked ? '1' : '0';
+
+      const params = new URLSearchParams({ from, to, llm });
+      if (season) params.set('season', season);
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin"></span>' +
+        (llm === '1' ? 'Собираю данные и пишу текст…' : 'Собираю данные…');
+
+      try {
+        const resp = await fetch('/api/generate?' + params.toString());
+        if (!resp.ok) {
+          let detail = 'HTTP ' + resp.status;
+          try { detail = (await resp.json()).error || detail; } catch (_) {}
+          throw new Error(detail);
+        }
+        const blob = await resp.blob();
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+        const name = m ? decodeURIComponent(m[1]) : 'khl_report.docx';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name; document.body.appendChild(a); a.click();
+        a.remove(); URL.revokeObjectURL(url);
+        msg.className = 'msg ok';
+        msg.textContent = 'Готово: файл «' + name + '» скачан.';
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = 'Ошибка: ' + err.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Сформировать отчёт';
+      }
+    });
+  </script>
+</body>
+</html>

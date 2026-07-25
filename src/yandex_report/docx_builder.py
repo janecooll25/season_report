@@ -29,18 +29,14 @@ def _add_table(doc: Document, block: DataBlock) -> None:
             cells[i].text = str(val)
 
 
-def build_report(
+def _assemble(
     *,
     season: str,
     counter_id: str,
     generated_at: str,
     blocks: dict[str, DataBlock],
     prose: dict[str, str],
-    output_path: str | Path,
-) -> Path:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
+) -> Document:
     doc = Document()
 
     # Титул приложения
@@ -79,5 +75,49 @@ def build_report(
         "Google Analytics / счётчики Клубов) и в этот отчёт не включены."
     ).italic = True
 
+    return doc
+
+
+def build_report(
+    *,
+    season: str,
+    counter_id: str,
+    generated_at: str,
+    blocks: dict[str, DataBlock],
+    prose: dict[str, str],
+    output_path: str | Path,
+) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc = _assemble(
+        season=season,
+        counter_id=counter_id,
+        generated_at=generated_at,
+        blocks=blocks,
+        prose=prose,
+    )
     doc.save(str(output_path))
     return output_path
+
+
+def build_report_bytes(
+    *,
+    season: str,
+    counter_id: str,
+    generated_at: str,
+    blocks: dict[str, DataBlock],
+    prose: dict[str, str],
+) -> bytes:
+    """Собирает отчёт в память и возвращает байты .docx (для веб-выдачи)."""
+    from io import BytesIO
+
+    doc = _assemble(
+        season=season,
+        counter_id=counter_id,
+        generated_at=generated_at,
+        blocks=blocks,
+        prose=prose,
+    )
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()

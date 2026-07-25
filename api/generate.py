@@ -1,0 +1,99 @@
+"""Vercel serverless-функция: генерация отчёта КХЛ по интернет-аудитории.
+
+GET /api/generate?from=YYYY-MM-DD&to=YYYY-MM-DD&season=2024/2025&llm=1
+Отдаёт готовый .docx как вложение (или JSON с ошибкой).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, quote, urlparse
+
+# Пакет лежит в src/ — добавляем в путь (bundled через vercel.json includeFiles).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from yandex_report.config import Config  # noqa: E402
+from yandex_report.docx_builder import build_report_bytes  # noqa: E402
+from yandex_report.metrika_client import MetrikaClient, MetrikaError  # noqa: E402
+from yandex_report.report_data import collect, default_season  # noqa: E402
+from yandex_report.report_writer import write_sections_parallel  # noqa: E402
+from yandex_report.structure import SECTIONS  # noqa: E402
+
+DOCX_MIME = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+
+def _generate(params: dict[str, list[str]]) -> tuple[str, bytes]:
+    use_llm = params.get("llm", ["1"])[0] != "0"
+    config = Config.from_env(require_llm=use_llm)
+
+    date_from = params.get("from", [""])[0]
+    date_to = params.get("to", [""])[0]
+    season = params.get("season", [""])[0]
+
+    if date_from and date_to:
+        d1, d2 = date_from, date_to
+        season = season or f"{d1[:4]}/{d2[:4]}"
+    else:
+        d1, d2, auto_season = default_season()
+        season = season or auto_season
+
+    client = MetrikaClient(config.token, config.counter_id)
+    blocks = collect(client, d1, d2)
+
+    prose: dict[str, str] = {}
+    if use_llm:
+        prose = asyncio.run(
+            write_sections_parallel(
+                config.anthropic_key, config.model, SECTIONS, blocks, season
+            )
+        )
+
+    data = build_report_bytes(
+        season=season,
+        counter_id=config.counter_id,
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        blocks=blocks,
+        prose=prose,
+    )
+    filename = f"khl_report_{season.replace('/', '_')}.docx"
+    return filename, data
+
+
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802 (Vercel требует это имя)
+        params = parse_qs(urlparse(self.path).query)
+        try:
+            filename, data = _generate(params)
+        except RuntimeError as exc:  # конфигурация (нет токена/ключа)
+            self._json(400, {"error": str(exc)})
+            return
+        except MetrikaError as exc:
+            self._json(502, {"error": f"Ошибка Яндекс.Метрики: {exc}"})
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._json(500, {"error": f"{exc.__class__.__name__}: {exc}"})
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", DOCX_MIME)
+        self.send_header(
+            "Content-Disposition",
+            f"attachment; filename*=UTF-8''{quote(filename)}",
+        )
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _json(self, code: int, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)

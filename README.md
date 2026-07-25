@@ -49,6 +49,33 @@ PYTHONPATH=src python -m yandex_report.cli --no-llm
 
 Готовый файл появится в `output/`.
 
+## Веб-версия на Vercel
+
+В проекте есть готовое веб-приложение: форма выбора сезона + serverless-функция,
+которая тянет Метрику, пишет текст через Claude (разделы генерируются
+параллельно, чтобы уложиться в лимит времени) и отдаёт `.docx` на скачивание.
+
+```
+public/index.html   — форма
+api/generate.py     — serverless-функция (GET /api/generate)
+vercel.json         — runtime, maxDuration=60, бандлинг src/
+```
+
+### Деплой
+
+1. Импортируйте репозиторий в Vercel (New Project → выбрать репозиторий).
+2. В **Settings → Environment Variables** задайте:
+   - `YANDEX_METRIKA_TOKEN` — OAuth-токен Метрики;
+   - `YANDEX_METRIKA_COUNTER_ID` — ID счётчика;
+   - `ANTHROPIC_API_KEY` — ключ Anthropic;
+   - `REPORT_MODEL` *(необязательно)* — модель, по умолчанию `claude-opus-5`.
+3. Deploy. Форма будет на корневом URL, функция — на `/api/generate`.
+
+> На Vercel у функции обычный исходящий интернет, поэтому Яндекс.Метрика
+> доступна (в отличие от изолированной песочницы разработки).
+
+Локальный запуск веб-версии: `vercel dev` (нужен Vercel CLI).
+
 ## Структура проекта
 
 ```
@@ -57,11 +84,14 @@ src/yandex_report/
   metrika_client.py  # клиент Reporting API Метрики
   report_data.py     # запросы + агрегация по разделам (DataBlock)
   structure.py       # СТРУКТУРА отчёта: разделы, заголовки, примеры стиля
-  report_writer.py   # генерация текста разделов через Claude
-  docx_builder.py    # сборка нового .docx из структуры/данных/текста
-  cli.py             # точка входа
+  report_writer.py   # генерация текста разделов через Claude (+ параллельно)
+  docx_builder.py    # сборка нового .docx (в файл или в память)
+  cli.py             # точка входа CLI
+api/generate.py      # serverless-функция Vercel
+public/index.html    # веб-форма
+vercel.json          # конфигурация Vercel
 samples/             # образец отчёта, из которого взята структура
-tests/               # тесты на сбор данных и сборку docx
+tests/               # тесты на сбор данных, сборку docx и веб-функцию
 ```
 
 ## Как менять структуру или стиль
