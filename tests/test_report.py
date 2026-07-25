@@ -7,37 +7,42 @@ from yandex_report.report_data import DataBlock, collect, default_season
 from yandex_report.structure import SECTIONS
 
 
+def _cmp(rows):
+    """Оборачивает строки в comparison-формат: metrics=[[A],[B]]."""
+    return {"data": [
+        {"dimensions": [{"name": n}], "metrics": [[cur], [prev]]}
+        for n, cur, prev in rows
+    ]}
+
+
 class FakeClient:
-    """Замоканный клиент Метрики: фиксированные ответы по dimensions."""
+    """Замоканный клиент Метрики: comparison-ответы (текущий/прошлый сезон)."""
 
     counter_id = "12345678"
 
-    def query(self, metrics, dimensions, d1, d2, *, limit=100, sort=None, filters=None):
-        if dimensions is None:
-            return {"totals": [1000, 800, 3000, 25.5, 130.0, 3.0]}
+    def query_comparison(self, metrics, dimensions, a1, a2, b1, b2,
+                         *, limit=100, sort=None, filters=None):
+        if dimensions is None:  # сводка: totals=[[A],[B]]
+            return {"totals": [[1000, 800, 3000, 25.5, 130.0, 3.0],
+                               [900, 750, 2800, 27.0, 125.0, 2.9]]}
         if "regionCountry" in dimensions:
-            return {"data": [
-                {"dimensions": [{"name": "Россия"}], "metrics": [900]},
-                {"dimensions": [{"name": "Беларусь"}], "metrics": [100]},
-            ]}
+            return _cmp([("Россия", 900, 850), ("Беларусь", 100, 120)])
         if "regionCity" in dimensions:
-            return {"data": [{"dimensions": [{"name": "Москва"}], "metrics": [500]}]}
+            return _cmp([("Москва", 500, 480)])
         if "ageInterval" in dimensions:
-            return {"data": [
-                {"dimensions": [{"name": "25-34"}], "metrics": [400, 20.0, 3.5, 150.0]},
-            ]}
+            return _cmp([("25-34", 400, 380)])
         if "gender" in dimensions:
-            return {"data": [{"dimensions": [{"name": "Мужской"}], "metrics": [700]}]}
+            return _cmp([("Мужской", 700, 690)])
         if "interest" in dimensions:
-            return {"data": [{"dimensions": [{"name": "Финансы"}], "metrics": [362]}]}
+            return _cmp([("Финансы", 362, 350)])
         if "lastSocialNetwork" in dimensions:
-            return {"data": [{"dimensions": [{"name": "ВКонтакте"}], "metrics": [120]}]}
+            return _cmp([("ВКонтакте", 120, 100)])
         if "lastTrafficSource" in dimensions:
-            return {"data": [{"dimensions": [{"name": "Поисковые системы"}], "metrics": [600]}]}
+            return _cmp([("Поисковые системы", 600, 610)])
         if "deviceCategory" in dimensions:
-            return {"data": [{"dimensions": [{"name": "Смартфоны"}], "metrics": [650]}]}
+            return _cmp([("Смартфоны", 650, 600)])
         if "operatingSystem" in dimensions:
-            return {"data": [{"dimensions": [{"name": "Android"}], "metrics": [500]}]}
+            return _cmp([("Android", 500, 470)])
         return {"data": []}
 
 
@@ -46,10 +51,13 @@ def test_collect_builds_all_blocks():
     for section in SECTIONS:
         assert section.data_key in blocks, section.data_key
     assert blocks["summary"].totals["визиты"] == 1000
-    # доля страны считается от всех визитов
-    assert blocks["geo_countries"].rows[0][0] == "Россия"
-    assert blocks["geo_countries"].rows[0][2] == "90.0%"
-    assert blocks["interests"].rows[0] == ["Финансы", "362"]
+    # визиты выросли с 900 до 1000 → +11.1%
+    assert blocks["summary"].rows[0] == ["Визиты", "1000", "+11.1%"]
+    # доля страны + изменение к прошлому сезону (900 vs 850)
+    assert blocks["geo_countries"].rows[0][:3] == ["Россия", "900", "90.0%"]
+    assert blocks["geo_countries"].rows[0][3] == "+5.9%"
+    # интересы: аффинити + изменение в пунктах (362 vs 350)
+    assert blocks["interests"].rows[0] == ["Финансы", "362", "+12"]
 
 
 def test_metrika_client_passes_filters():

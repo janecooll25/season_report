@@ -1,7 +1,8 @@
 """Сбор данных из Яндекс.Метрики под структуру отчёта КХЛ.
 
-Каждый раздел получает DataBlock: заголовок, колонки, строки и краткая
-текстовая сводка фактов (её читает Claude при написании прозы).
+Каждый раздел получает DataBlock: колонки, строки и краткая текстовая сводка
+фактов (её читает Claude при написании прозы). Данные собираются в сравнении
+текущего сезона (A) с прошлым (B) — отсюда колонка «Изменение».
 """
 from __future__ import annotations
 
@@ -37,28 +38,59 @@ def default_season() -> tuple[str, str, str]:
     Возвращает (date1, date2, label), напр. ("2024-07-01","2025-06-30","2024/2025").
     """
     today = date.today()
-    # Если сейчас до июля — текущий сезон ещё не закончился, берём прошлый.
-    end_year = today.year if today.month >= 7 else today.year
+    end_year = today.year
     start = date(end_year - 1, 7, 1)
     end = date(end_year, 6, 30)
     return start.isoformat(), end.isoformat(), f"{start.year}/{end.year}"
 
 
-def _rows_with_share(payload: dict[str, Any], total: float) -> list[list[str]]:
+def prev_period(d1: str, d2: str) -> tuple[str, str]:
+    """Тот же период годом ранее."""
+    a = date.fromisoformat(d1)
+    b = date.fromisoformat(d2)
+    return (
+        a.replace(year=a.year - 1).isoformat(),
+        b.replace(year=b.year - 1).isoformat(),
+    )
+
+
+def _change(cur: float, prev: float) -> str:
+    """Относительное изменение к прошлому сезону, напр. '+12.3%' / '-5.1%'."""
+    if not prev:
+        return "новое" if cur else "—"
+    delta = (cur - prev) / prev * 100
+    sign = "+" if delta >= 0 else "−"
+    return f"{sign}{abs(round(delta, 1))}%"
+
+
+def _change_points(cur: float, prev: float) -> str:
+    """Изменение в абсолютных пунктах (для индексов/долей)."""
+    d = round(cur - prev)
+    return f"+{d}" if d >= 0 else f"−{abs(d)}"
+
+
+def _ab(item: dict[str, Any]) -> tuple[list, list]:
+    """Достаёт пару [значения A],[значения B] из строки comparison-ответа."""
+    m = item.get("metrics") or [[0], [0]]
+    a = m[0] if len(m) > 0 else [0]
+    b = m[1] if len(m) > 1 else [0]
+    return a, b
+
+
+def _rows_share_change(payload: dict[str, Any], total: float) -> list[list[str]]:
     rows: list[list[str]] = []
     for item in payload.get("data", []):
         dims = item.get("dimensions", [])
         name = (dims[0].get("name") if dims else None) or "не задано"
-        metrics = item.get("metrics", [0])
-        visits = int(metrics[0] or 0)
-        share = round(visits / total * 100, 1) if total else 0.0
-        rows.append([name, str(visits), f"{share}%"])
+        a, b = _ab(item)
+        cur = int(a[0] or 0)
+        prev = int(b[0] or 0)
+        share = round(cur / total * 100, 1) if total else 0.0
+        rows.append([name, str(cur), f"{share}%", _change(cur, prev)])
     return rows
 
 
-# Спецификации запросов по разделам. Все, кроме сводки, независимы и
-# выполняются параллельно — иначе последовательная выборка над периодом
-# в сезон не укладывается в лимит времени serverless-функции.
+# Разделы (кроме сводки и интересов) — счётчик визитов + доля + изменение.
 _SPECS: dict[str, dict[str, Any]] = {
     "geo_countries": dict(
         metrics="ym:s:visits", dimensions="ym:s:regionCountry",
@@ -69,8 +101,8 @@ _SPECS: dict[str, dict[str, Any]] = {
         sort="-ym:s:visits", limit=15, filters=RU_FILTER,
     ),
     "demography_age": dict(
-        metrics="ym:s:visits,ym:s:bounceRate,ym:s:pageDepth,ym:s:avgVisitDurationSeconds",
-        dimensions="ym:s:ageInterval", sort="-ym:s:visits", limit=10,
+        metrics="ym:s:visits", dimensions="ym:s:ageInterval",
+        sort="-ym:s:visits", limit=10,
     ),
     "demography_gender": dict(
         metrics="ym:s:visits", dimensions="ym:s:gender",
@@ -98,121 +130,105 @@ _SPECS: dict[str, dict[str, Any]] = {
     ),
 }
 
+# Колонки таблиц по разделам (по умолчанию — как у большинства).
+_COLUMNS: dict[str, list[str]] = {
+    "geo_countries": ["Страна", "Визиты", "Доля", "Изменение"],
+    "geo_regions": ["Город", "Визиты", "Доля", "Изменение"],
+    "demography_age": ["Возраст", "Визиты", "Доля", "Изменение"],
+    "demography_gender": ["Пол", "Визиты", "Доля", "Изменение"],
+    "traffic_sources": ["Источник трафика", "Визиты", "Доля", "Изменение"],
+    "social": ["Социальная сеть", "Визиты", "Доля", "Изменение"],
+    "devices": ["Тип устройства", "Визиты", "Доля", "Изменение"],
+    "os": ["Операционная система", "Визиты", "Доля", "Изменение"],
+}
+
 
 def _fetch_parallel(
-    client: MetrikaClient, d1: str, d2: str, max_workers: int = 5
+    client: MetrikaClient, a1: str, a2: str, b1: str, b2: str, max_workers: int = 5
 ) -> dict[str, dict[str, Any]]:
     from concurrent.futures import ThreadPoolExecutor
 
-    def run(key: str, spec: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        return key, client.query(
-            spec["metrics"], spec["dimensions"], d1, d2,
+    def run(item: tuple[str, dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+        key, spec = item
+        return key, client.query_comparison(
+            spec["metrics"], spec["dimensions"], a1, a2, b1, b2,
             limit=spec.get("limit", 10), sort=spec.get("sort"),
             filters=spec.get("filters"),
         )
 
     results: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        for key, payload in ex.map(lambda kv: run(*kv), _SPECS.items()):
+        for key, payload in ex.map(run, _SPECS.items()):
             results[key] = payload
     return results
 
 
 def collect(client: MetrikaClient, d1: str, d2: str) -> dict[str, DataBlock]:
-    """Собирает все блоки данных для отчёта за период d1..d2."""
+    """Собирает все блоки данных за сезон d1..d2 в сравнении с прошлым сезоном."""
+    b1, b2 = prev_period(d1, d2)
     blocks: dict[str, DataBlock] = {}
 
     # --- Сводка (нужна первой: даёт общее число визитов для долей) ---
-    summary = client.query(
+    summary = client.query_comparison(
         "ym:s:visits,ym:s:users,ym:s:pageviews,ym:s:bounceRate,"
         "ym:s:avgVisitDurationSeconds,ym:s:pageDepth",
         None,
-        d1,
-        d2,
+        d1, d2, b1, b2,
         limit=1,
     )
-    t = summary.get("totals", [0, 0, 0, 0, 0, 0])
-    visits = int(t[0] or 0)
-    dur = int(round(float(t[4] or 0)))
+    tot = summary.get("totals") or [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]]
+    a = tot[0]
+    bp = tot[1] if len(tot) > 1 else [0] * 6
+    visits = int(a[0] or 0)
+    dur = int(round(float(a[4] or 0)))
     blocks["summary"] = DataBlock(
-        columns=["Показатель", "Значение"],
+        columns=["Показатель", "Значение", "Изменение"],
         rows=[
-            ["Визиты", str(visits)],
-            ["Пользователи", str(int(t[1] or 0))],
-            ["Просмотры страниц", str(int(t[2] or 0))],
-            ["Отказы", f"{round(float(t[3] or 0), 1)}%"],
-            ["Средняя длительность визита", f"{dur // 60} мин {dur % 60} сек"],
-            ["Глубина просмотра", str(round(float(t[5] or 0), 2))],
+            ["Визиты", str(visits), _change(visits, int(bp[0] or 0))],
+            ["Пользователи", str(int(a[1] or 0)), _change(int(a[1] or 0), int(bp[1] or 0))],
+            ["Просмотры страниц", str(int(a[2] or 0)), _change(int(a[2] or 0), int(bp[2] or 0))],
+            ["Отказы", f"{round(float(a[3] or 0), 1)}%",
+             _change(float(a[3] or 0), float(bp[3] or 0))],
+            ["Средняя длительность визита", f"{dur // 60} мин {dur % 60} сек",
+             _change(float(a[4] or 0), float(bp[4] or 0))],
+            ["Глубина просмотра", str(round(float(a[5] or 0), 2)),
+             _change(float(a[5] or 0), float(bp[5] or 0))],
         ],
-        totals={"визиты": visits, "пользователи": int(t[1] or 0)},
+        totals={"визиты": visits, "пользователи": int(a[1] or 0)},
     )
 
     # --- Остальные разделы — параллельно ---
-    p = _fetch_parallel(client, d1, d2)
+    p = _fetch_parallel(client, d1, d2, b1, b2)
 
-    blocks["geo_countries"] = DataBlock(
-        columns=["Страна", "Визиты", "Доля"],
-        rows=_rows_with_share(p["geo_countries"], visits),
-    )
-    blocks["geo_regions"] = DataBlock(
-        columns=["Город", "Визиты", "Доля"],
-        rows=_rows_with_share(p["geo_regions"], visits),
-    )
-
-    age_rows = []
-    for item in p["demography_age"].get("data", []):
-        dims = item.get("dimensions", [])
-        name = (dims[0].get("name") if dims else None) or "не задано"
-        m = item.get("metrics", [0, 0, 0, 0])
-        v = int(m[0] or 0)
-        share = round(v / visits * 100, 1) if visits else 0.0
-        age_rows.append(
-            [name, str(v), f"{share}%", f"{round(float(m[1] or 0), 1)}%",
-             str(round(float(m[2] or 0), 2))]
+    for key in ("geo_countries", "geo_regions", "demography_age",
+                "demography_gender", "traffic_sources", "devices", "os"):
+        blocks[key] = DataBlock(
+            columns=_COLUMNS[key],
+            rows=_rows_share_change(p[key], visits),
         )
-    blocks["demography_age"] = DataBlock(
-        columns=["Возраст", "Визиты", "Доля", "Отказы", "Глубина"],
-        rows=age_rows,
-    )
 
-    blocks["demography_gender"] = DataBlock(
-        columns=["Пол", "Визиты", "Доля"],
-        rows=_rows_with_share(p["demography_gender"], visits),
-    )
-
+    # --- Интересы (аффинити-индекс) ---
     int_rows = []
     for item in p["interests"].get("data", []):
         dims = item.get("dimensions", [])
         name = (dims[0].get("name") if dims else None) or "не задано"
-        m = item.get("metrics", [0])
-        int_rows.append([name, str(round(float(m[0] or 0)))])
+        av, bv = _ab(item)
+        cur = round(float(av[0] or 0))
+        prev = round(float(bv[0] or 0))
+        int_rows.append([name, str(cur), _change_points(cur, prev)])
     blocks["interests"] = DataBlock(
-        columns=["Интерес", "Аффинити-индекс"],
+        columns=["Интерес", "Аффинити-индекс", "Изменение"],
         rows=int_rows,
     )
 
-    blocks["traffic_sources"] = DataBlock(
-        columns=["Источник трафика", "Визиты", "Доля"],
-        rows=_rows_with_share(p["traffic_sources"], visits),
-    )
-
-    social_rows = [r for r in _rows_with_share(p["social"], visits) if r[0] != "не задано"]
+    # --- Социальные сети: доля внутри соцсетей ---
+    social_rows = [r for r in _rows_share_change(p["social"], visits) if r[0] != "не задано"]
     social_total = sum(int(r[1]) for r in social_rows) or 1
-    for r in social_rows:  # доля внутри соцсетей
+    for r in social_rows:
         r[2] = f"{round(int(r[1]) / social_total * 100, 1)}%"
     blocks["social"] = DataBlock(
-        columns=["Социальная сеть", "Визиты", "Доля"],
+        columns=["Социальная сеть", "Визиты", "Доля", "Изменение"],
         rows=social_rows,
-    )
-
-    blocks["devices"] = DataBlock(
-        columns=["Тип устройства", "Визиты", "Доля"],
-        rows=_rows_with_share(p["devices"], visits),
-    )
-
-    blocks["os"] = DataBlock(
-        columns=["Операционная система", "Визиты", "Доля"],
-        rows=_rows_with_share(p["os"], visits),
     )
 
     return blocks
