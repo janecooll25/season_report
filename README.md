@@ -68,7 +68,12 @@ vercel.json         — runtime, maxDuration=60, бандлинг src/
    - `YANDEX_METRIKA_TOKEN` — OAuth-токен Метрики;
    - `YANDEX_METRIKA_COUNTER_ID` — ID счётчика;
    - `ANTHROPIC_API_KEY` — ключ Anthropic;
-   - `REPORT_MODEL` *(необязательно)* — модель, по умолчанию `claude-opus-5`.
+   - `REPORT_MODEL` *(необяз.)* — модель, по умолчанию `claude-opus-5`;
+   - `REPORT_EFFORT` *(необяз.)* — усилие модели, по умолчанию `low`;
+   - `METRIKA_ACCURACY` *(необяз.)* — точность выборки, по умолчанию `medium`
+     (`full` точнее, но над сезоном считается очень долго и может упереться
+     в лимит времени функции);
+   - `METRIKA_TIMEOUT` *(необяз.)* — таймаут запроса к Метрике, сек (по умолчанию 50).
 3. Deploy. Форма будет на корневом URL, функция — на `/api/generate`.
 
 > На Vercel у функции обычный исходящий интернет, поэтому Яндекс.Метрика

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import requests
 
 API_URL = "https://api-metrika.yandex.net/stat/v1/data"
-REQUEST_TIMEOUT = 30
+
+# accuracy=full над периодом в сезон считается очень долго — по умолчанию
+# берём medium (быстро, достаточно для отчёта). Переопределяется через env.
+DEFAULT_ACCURACY = os.environ.get("METRIKA_ACCURACY", "medium").strip() or "medium"
+REQUEST_TIMEOUT = int(os.environ.get("METRIKA_TIMEOUT", "50"))
 
 
 class MetrikaError(RuntimeError):
@@ -15,10 +20,20 @@ class MetrikaError(RuntimeError):
 class MetrikaClient:
     """Тонкая обёртка над Reporting API Яндекс.Метрики (stat/v1/data)."""
 
-    def __init__(self, token: str, counter_id: str, session: requests.Session | None = None):
+    def __init__(
+        self,
+        token: str,
+        counter_id: str,
+        session: requests.Session | None = None,
+        *,
+        accuracy: str = DEFAULT_ACCURACY,
+        timeout: int = REQUEST_TIMEOUT,
+    ):
         self.counter_id = counter_id
         self.session = session or requests.Session()
         self.session.headers.update({"Authorization": f"OAuth {token}"})
+        self.accuracy = accuracy
+        self.timeout = timeout
 
     def query(
         self,
@@ -37,7 +52,7 @@ class MetrikaClient:
             "date1": date1,
             "date2": date2,
             "limit": limit,
-            "accuracy": "full",
+            "accuracy": self.accuracy,
         }
         if dimensions:
             params["dimensions"] = dimensions
@@ -47,7 +62,7 @@ class MetrikaClient:
             params["filters"] = filters
 
         try:
-            resp = self.session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)
+            resp = self.session.get(API_URL, params=params, timeout=self.timeout)
         except requests.RequestException as exc:
             raise MetrikaError(f"Сетевая ошибка при запросе к Метрике: {exc}") from exc
 

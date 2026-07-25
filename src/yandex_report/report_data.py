@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 from .metrika_client import MetrikaClient
@@ -44,22 +44,6 @@ def default_season() -> tuple[str, str, str]:
     return start.isoformat(), end.isoformat(), f"{start.year}/{end.year}"
 
 
-def _dim_query(
-    client: MetrikaClient,
-    metrics: str,
-    dimensions: str,
-    d1: str,
-    d2: str,
-    *,
-    limit: int = 10,
-    sort: str | None = None,
-    filters: str | None = None,
-) -> dict[str, Any]:
-    return client.query(
-        metrics, dimensions, d1, d2, limit=limit, sort=sort, filters=filters
-    )
-
-
 def _rows_with_share(payload: dict[str, Any], total: float) -> list[list[str]]:
     rows: list[list[str]] = []
     for item in payload.get("data", []):
@@ -72,11 +56,73 @@ def _rows_with_share(payload: dict[str, Any], total: float) -> list[list[str]]:
     return rows
 
 
+# Спецификации запросов по разделам. Все, кроме сводки, независимы и
+# выполняются параллельно — иначе последовательная выборка над периодом
+# в сезон не укладывается в лимит времени serverless-функции.
+_SPECS: dict[str, dict[str, Any]] = {
+    "geo_countries": dict(
+        metrics="ym:s:visits", dimensions="ym:s:regionCountry",
+        sort="-ym:s:visits", limit=15,
+    ),
+    "geo_regions": dict(
+        metrics="ym:s:visits", dimensions="ym:s:regionCity",
+        sort="-ym:s:visits", limit=15, filters=RU_FILTER,
+    ),
+    "demography_age": dict(
+        metrics="ym:s:visits,ym:s:bounceRate,ym:s:pageDepth,ym:s:avgVisitDurationSeconds",
+        dimensions="ym:s:ageInterval", sort="-ym:s:visits", limit=10,
+    ),
+    "demography_gender": dict(
+        metrics="ym:s:visits", dimensions="ym:s:gender",
+        sort="-ym:s:visits", limit=5,
+    ),
+    "interests": dict(
+        metrics="ym:s:affinityIndexInterests", dimensions="ym:s:interest",
+        sort="-ym:s:affinityIndexInterests", limit=10,
+    ),
+    "traffic_sources": dict(
+        metrics="ym:s:visits", dimensions="ym:s:lastTrafficSource",
+        sort="-ym:s:visits", limit=10,
+    ),
+    "social": dict(
+        metrics="ym:s:visits", dimensions="ym:s:lastSocialNetwork",
+        sort="-ym:s:visits", limit=10,
+    ),
+    "devices": dict(
+        metrics="ym:s:visits", dimensions="ym:s:deviceCategory",
+        sort="-ym:s:visits", limit=10,
+    ),
+    "os": dict(
+        metrics="ym:s:visits", dimensions="ym:s:operatingSystemRoot",
+        sort="-ym:s:visits", limit=10,
+    ),
+}
+
+
+def _fetch_parallel(
+    client: MetrikaClient, d1: str, d2: str, max_workers: int = 5
+) -> dict[str, dict[str, Any]]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run(key: str, spec: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return key, client.query(
+            spec["metrics"], spec["dimensions"], d1, d2,
+            limit=spec.get("limit", 10), sort=spec.get("sort"),
+            filters=spec.get("filters"),
+        )
+
+    results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for key, payload in ex.map(lambda kv: run(*kv), _SPECS.items()):
+            results[key] = payload
+    return results
+
+
 def collect(client: MetrikaClient, d1: str, d2: str) -> dict[str, DataBlock]:
     """Собирает все блоки данных для отчёта за период d1..d2."""
     blocks: dict[str, DataBlock] = {}
 
-    # --- Сводка ---
+    # --- Сводка (нужна первой: даёт общее число визитов для долей) ---
     summary = client.query(
         "ym:s:visits,ym:s:users,ym:s:pageviews,ym:s:bounceRate,"
         "ym:s:avgVisitDurationSeconds,ym:s:pageDepth",
@@ -101,83 +147,41 @@ def collect(client: MetrikaClient, d1: str, d2: str) -> dict[str, DataBlock]:
         totals={"визиты": visits, "пользователи": int(t[1] or 0)},
     )
 
-    # --- География: страны ---
-    geo_c = _dim_query(
-        client, "ym:s:visits", "ym:s:regionCountry", d1, d2, sort="-ym:s:visits", limit=15
-    )
+    # --- Остальные разделы — параллельно ---
+    p = _fetch_parallel(client, d1, d2)
+
     blocks["geo_countries"] = DataBlock(
         columns=["Страна", "Визиты", "Доля"],
-        rows=_rows_with_share(geo_c, visits),
-    )
-
-    # --- География: регионы/города РФ ---
-    geo_r = _dim_query(
-        client,
-        "ym:s:visits",
-        "ym:s:regionCity",
-        d1,
-        d2,
-        sort="-ym:s:visits",
-        limit=15,
-        filters=RU_FILTER,
+        rows=_rows_with_share(p["geo_countries"], visits),
     )
     blocks["geo_regions"] = DataBlock(
         columns=["Город", "Визиты", "Доля"],
-        rows=_rows_with_share(geo_r, visits),
+        rows=_rows_with_share(p["geo_regions"], visits),
     )
 
-    # --- Демография: возраст ---
-    age = _dim_query(
-        client,
-        "ym:s:visits,ym:s:bounceRate,ym:s:pageDepth,ym:s:avgVisitDurationSeconds",
-        "ym:s:ageInterval",
-        d1,
-        d2,
-        sort="-ym:s:visits",
-        limit=10,
-    )
     age_rows = []
-    for item in age.get("data", []):
+    for item in p["demography_age"].get("data", []):
         dims = item.get("dimensions", [])
         name = (dims[0].get("name") if dims else None) or "не задано"
         m = item.get("metrics", [0, 0, 0, 0])
         v = int(m[0] or 0)
         share = round(v / visits * 100, 1) if visits else 0.0
         age_rows.append(
-            [
-                name,
-                str(v),
-                f"{share}%",
-                f"{round(float(m[1] or 0), 1)}%",
-                str(round(float(m[2] or 0), 2)),
-            ]
+            [name, str(v), f"{share}%", f"{round(float(m[1] or 0), 1)}%",
+             str(round(float(m[2] or 0), 2))]
         )
     blocks["demography_age"] = DataBlock(
         columns=["Возраст", "Визиты", "Доля", "Отказы", "Глубина"],
         rows=age_rows,
     )
 
-    # --- Демография: пол ---
-    gender = _dim_query(
-        client, "ym:s:visits", "ym:s:gender", d1, d2, sort="-ym:s:visits", limit=5
-    )
     blocks["demography_gender"] = DataBlock(
         columns=["Пол", "Визиты", "Доля"],
-        rows=_rows_with_share(gender, visits),
+        rows=_rows_with_share(p["demography_gender"], visits),
     )
 
-    # --- Интересы (аффинити-индекс) ---
-    interests = _dim_query(
-        client,
-        "ym:s:affinityIndexInterests",
-        "ym:s:interest",
-        d1,
-        d2,
-        sort="-ym:s:affinityIndexInterests",
-        limit=10,
-    )
     int_rows = []
-    for item in interests.get("data", []):
+    for item in p["interests"].get("data", []):
         dims = item.get("dimensions", [])
         name = (dims[0].get("name") if dims else None) or "не задано"
         m = item.get("metrics", [0])
@@ -187,32 +191,12 @@ def collect(client: MetrikaClient, d1: str, d2: str) -> dict[str, DataBlock]:
         rows=int_rows,
     )
 
-    # --- Источники трафика ---
-    sources = _dim_query(
-        client,
-        "ym:s:visits",
-        "ym:s:lastTrafficSource",
-        d1,
-        d2,
-        sort="-ym:s:visits",
-        limit=10,
-    )
     blocks["traffic_sources"] = DataBlock(
         columns=["Источник трафика", "Визиты", "Доля"],
-        rows=_rows_with_share(sources, visits),
+        rows=_rows_with_share(p["traffic_sources"], visits),
     )
 
-    # --- Социальные сети ---
-    social = _dim_query(
-        client,
-        "ym:s:visits",
-        "ym:s:lastSocialNetwork",
-        d1,
-        d2,
-        sort="-ym:s:visits",
-        limit=10,
-    )
-    social_rows = [r for r in _rows_with_share(social, visits) if r[0] != "не задано"]
+    social_rows = [r for r in _rows_with_share(p["social"], visits) if r[0] != "не задано"]
     social_total = sum(int(r[1]) for r in social_rows) or 1
     for r in social_rows:  # доля внутри соцсетей
         r[2] = f"{round(int(r[1]) / social_total * 100, 1)}%"
@@ -221,28 +205,14 @@ def collect(client: MetrikaClient, d1: str, d2: str) -> dict[str, DataBlock]:
         rows=social_rows,
     )
 
-    # --- Устройства ---
-    devices = _dim_query(
-        client, "ym:s:visits", "ym:s:deviceCategory", d1, d2, sort="-ym:s:visits", limit=10
-    )
     blocks["devices"] = DataBlock(
         columns=["Тип устройства", "Визиты", "Доля"],
-        rows=_rows_with_share(devices, visits),
+        rows=_rows_with_share(p["devices"], visits),
     )
 
-    # --- Операционные системы ---
-    os_block = _dim_query(
-        client,
-        "ym:s:visits",
-        "ym:s:operatingSystemRoot",
-        d1,
-        d2,
-        sort="-ym:s:visits",
-        limit=10,
-    )
     blocks["os"] = DataBlock(
         columns=["Операционная система", "Визиты", "Доля"],
-        rows=_rows_with_share(os_block, visits),
+        rows=_rows_with_share(p["os"], visits),
     )
 
     return blocks

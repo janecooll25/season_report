@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import anthropic
 
 from .report_data import DataBlock
 from .structure import Section
+
+# Короткие абзацы по готовым цифрам не требуют глубокого рассуждения —
+# low ускоряет генерацию (важно для лимита времени на Vercel).
+EFFORT = os.environ.get("REPORT_EFFORT", "low").strip() or "low"
 
 SYSTEM_PROMPT = (
     "Ты — аналитик Континентальной хоккейной лиги (КХЛ). Пишешь официальный "
@@ -62,6 +67,7 @@ class ReportWriter:
             model=self.model,
             max_tokens=2000,
             system=SYSTEM_PROMPT,
+            output_config={"effort": EFFORT},
             messages=[{"role": "user", "content": _build_prompt(section, data, season)}],
         )
         return _extract(message)
@@ -86,6 +92,7 @@ async def write_sections_parallel(
                 model=model,
                 max_tokens=2000,
                 system=SYSTEM_PROMPT,
+                output_config={"effort": EFFORT},
                 messages=[
                     {"role": "user", "content": _build_prompt(section, block, season)}
                 ],
