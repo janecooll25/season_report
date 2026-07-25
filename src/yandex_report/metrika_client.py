@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import requests
@@ -11,6 +12,7 @@ API_URL = "https://api-metrika.yandex.net/stat/v1/data"
 # берём medium (быстро, достаточно для отчёта). Переопределяется через env.
 DEFAULT_ACCURACY = os.environ.get("METRIKA_ACCURACY", "medium").strip() or "medium"
 REQUEST_TIMEOUT = int(os.environ.get("METRIKA_TIMEOUT", "50"))
+MAX_RETRIES = int(os.environ.get("METRIKA_RETRIES", "5"))
 
 
 class MetrikaError(RuntimeError):
@@ -61,13 +63,26 @@ class MetrikaClient:
         if filters:
             params["filters"] = filters
 
-        try:
-            resp = self.session.get(API_URL, params=params, timeout=self.timeout)
-        except requests.RequestException as exc:
-            raise MetrikaError(f"Сетевая ошибка при запросе к Метрике: {exc}") from exc
+        # Ретраи на 429 (лимит параллельных запросов) и 5xx — с бэкоффом.
+        last_status = None
+        last_text = ""
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = self.session.get(API_URL, params=params, timeout=self.timeout)
+            except requests.RequestException as exc:
+                raise MetrikaError(
+                    f"Сетевая ошибка при запросе к Метрике: {exc}"
+                ) from exc
 
-        if resp.status_code != 200:
-            raise MetrikaError(
-                f"Метрика вернула {resp.status_code}: {resp.text[:500]}"
-            )
-        return resp.json()
+            if resp.status_code == 200:
+                return resp.json()
+
+            last_status, last_text = resp.status_code, resp.text[:500]
+            if resp.status_code in (429, 503) and attempt < MAX_RETRIES - 1:
+                retry_after = resp.headers.get("Retry-After")
+                wait = float(retry_after) if retry_after else min(0.5 * 2 ** attempt, 8)
+                time.sleep(wait)
+                continue
+            break
+
+        raise MetrikaError(f"Метрика вернула {last_status}: {last_text}")

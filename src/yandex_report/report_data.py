@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -14,6 +15,11 @@ from typing import Any
 from .metrika_client import MetrikaClient
 
 RU_FILTER = "ym:s:regionCountryName=='Россия'"
+
+# Метрика ограничивает число ОДНОВРЕМЕННЫХ запросов от пользователя
+# (quota_parallel_requests_by_uid). Держим низкий параллелизм; на 429
+# срабатывают ретраи в клиенте.
+CONCURRENCY = int(os.environ.get("METRIKA_CONCURRENCY", "2"))
 
 SUMMARY_METRICS = (
     "ym:s:visits,ym:s:users,ym:s:pageviews,ym:s:bounceRate,"
@@ -139,7 +145,8 @@ _COLUMNS: dict[str, list[str]] = {
 
 
 def _fetch_all(
-    client: MetrikaClient, d1: str, d2: str, b1: str, b2: str, max_workers: int = 6
+    client: MetrikaClient, d1: str, d2: str, b1: str, b2: str,
+    max_workers: int = CONCURRENCY,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """Тянет каждый раздел за оба периода параллельно. Ключ — (раздел, 'a'|'b')."""
     from concurrent.futures import ThreadPoolExecutor

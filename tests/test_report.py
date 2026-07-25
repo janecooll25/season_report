@@ -83,6 +83,36 @@ def test_metrika_client_passes_filters():
     assert captured["params"]["sort"] == "-ym:s:visits"
 
 
+def test_query_retries_on_429(monkeypatch):
+    """429 (лимит параллельных запросов) должен ретраиться и восстанавливаться."""
+    import requests
+
+    from yandex_report import metrika_client
+    from yandex_report.metrika_client import MetrikaClient
+
+    monkeypatch.setattr(metrika_client.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    class Resp:
+        def __init__(self, status):
+            self.status_code = status
+            self.headers = {}
+            self.text = "quota" if status == 429 else ""
+
+        def json(self):
+            return {"totals": [1]}
+
+    class DummySession(requests.Session):
+        def get(self, url, params=None, timeout=None):
+            calls["n"] += 1
+            return Resp(429 if calls["n"] < 3 else 200)
+
+    client = MetrikaClient("tok", "1", session=DummySession())
+    out = client.query("ym:s:visits", None, "2024-07-01", "2025-06-30")
+    assert out == {"totals": [1]}
+    assert calls["n"] == 3  # два 429, затем успех
+
+
 def test_default_season_is_july_to_june():
     d1, d2, label = default_season()
     assert d1.endswith("-07-01")
