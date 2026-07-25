@@ -29,6 +29,7 @@ class MetrikaClient:
         *,
         limit: int = 100,
         sort: str | None = None,
+        filters: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "ids": self.counter_id,
@@ -42,6 +43,8 @@ class MetrikaClient:
             params["dimensions"] = dimensions
         if sort:
             params["sort"] = sort
+        if filters:
+            params["filters"] = filters
 
         try:
             resp = self.session.get(API_URL, params=params, timeout=REQUEST_TIMEOUT)

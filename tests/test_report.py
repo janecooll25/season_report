@@ -52,6 +52,32 @@ def test_collect_builds_all_blocks():
     assert blocks["interests"].rows[0] == ["Финансы", "362"]
 
 
+def test_metrika_client_passes_filters():
+    """Реальный клиент должен принимать filters и класть его в params."""
+    import requests
+
+    from yandex_report.metrika_client import MetrikaClient
+
+    captured = {}
+
+    class DummyResp:
+        status_code = 200
+
+        def json(self):
+            return {"data": []}
+
+    class DummySession(requests.Session):
+        def get(self, url, params=None, timeout=None):
+            captured["params"] = params
+            return DummyResp()
+
+    client = MetrikaClient("tok", "6571768", session=DummySession())
+    client.query("ym:s:visits", "ym:s:regionCity", "2024-07-01", "2025-06-30",
+                 filters="ym:s:regionCountryName=='Россия'", sort="-ym:s:visits")
+    assert captured["params"]["filters"] == "ym:s:regionCountryName=='Россия'"
+    assert captured["params"]["sort"] == "-ym:s:visits"
+
+
 def test_default_season_is_july_to_june():
     d1, d2, label = default_season()
     assert d1.endswith("-07-01")
