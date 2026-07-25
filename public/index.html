@@ -24,31 +24,40 @@
       display: flex; align-items: center; justify-content: center; padding: 24px;
     }
     .card {
-      width: 100%; max-width: 520px; background: var(--card);
+      width: 100%; max-width: 540px; background: var(--card);
       border: 1px solid var(--border); border-radius: 14px; padding: 28px 26px;
       box-shadow: 0 6px 24px rgba(0,0,0,.06);
     }
     h1 { font-size: 20px; margin: 0 0 4px; }
-    .sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+    .sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
     label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
-    input[type=date], input[type=text] {
+    input[type=date], input[type=text], input[type=file] {
       width: 100%; padding: 9px 11px; border: 1px solid var(--border);
       border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px;
     }
+    input[type=file] { padding: 8px; }
     .row { display: flex; gap: 12px; }
     .row > div { flex: 1; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 6px; }
+    .tabs button {
+      flex: 1; padding: 9px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg); color: var(--fg); font-size: 13px; font-weight: 600;
+      cursor: pointer; margin: 0;
+    }
+    .tabs button.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
     .check { display: flex; align-items: center; gap: 9px; margin-top: 18px; font-size: 14px; }
     .check input { width: 16px; height: 16px; }
-    button {
+    button.go {
       width: 100%; margin-top: 22px; padding: 12px; border: 0; border-radius: 9px;
       background: var(--accent); color: var(--accent-fg); font-size: 15px;
       font-weight: 600; cursor: pointer;
     }
-    button:disabled { opacity: .6; cursor: default; }
+    button.go:disabled { opacity: .6; cursor: default; }
     .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
     .msg { margin-top: 16px; padding: 11px 13px; border-radius: 8px; font-size: 13px; display: none; }
     .msg.err { display: block; background: var(--err-bg); color: var(--err-fg); }
     .msg.ok { display: block; background: rgba(11,92,173,.1); color: var(--accent); }
+    .hidden { display: none; }
     .spin {
       display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.4);
       border-top-color: #fff; border-radius: 50%; animation: r .7s linear infinite;
@@ -60,23 +69,39 @@
 <body>
   <div class="card">
     <h1>Отчёт КХЛ по интернет-аудитории</h1>
-    <p class="sub">Данные из Яндекс.Метрики, аналитический текст — Claude. Результат в формате .docx.</p>
+    <p class="sub">Данные из Яндекс.Метрики (API или CSV-выгрузки), текст — Claude. Результат в .docx.</p>
+
+    <div class="tabs">
+      <button type="button" id="tab-api" class="active">API Метрики</button>
+      <button type="button" id="tab-csv">CSV-выгрузки</button>
+    </div>
 
     <form id="f">
-      <div class="row">
-        <div>
-          <label for="from">Начало периода</label>
-          <input type="date" id="from" required />
-        </div>
-        <div>
-          <label for="to">Конец периода</label>
-          <input type="date" id="to" required />
+      <!-- API-режим -->
+      <div id="pane-api">
+        <div class="row">
+          <div>
+            <label for="from">Начало периода</label>
+            <input type="date" id="from" />
+          </div>
+          <div>
+            <label for="to">Конец периода</label>
+            <input type="date" id="to" />
+          </div>
         </div>
       </div>
 
+      <!-- CSV-режим -->
+      <div id="pane-csv" class="hidden">
+        <label for="files">CSV-файлы, выгруженные из Метрики</label>
+        <input type="file" id="files" accept=".csv" multiple />
+        <p class="hint">Для каждого раздела приложите два файла — текущий и прошлый
+          сезон (диапазон дат в имени файла определит, какой из них текущий).</p>
+      </div>
+
       <label for="season">Метка сезона</label>
-      <input type="text" id="season" placeholder="2024/2025" />
-      <p class="hint">Подставляется в заголовки. По умолчанию — по годам периода.</p>
+      <input type="text" id="season" placeholder="2025/2026" />
+      <p class="hint">Подставляется в заголовки. По умолчанию — по датам данных.</p>
 
       <label class="check">
         <input type="checkbox" id="llm" checked />
@@ -84,17 +109,32 @@
       </label>
       <p class="hint">Без галочки — быстрый черновик: только заголовки и таблицы.</p>
 
-      <button type="submit" id="btn">Сформировать отчёт</button>
+      <button type="submit" class="go" id="btn">Сформировать отчёт</button>
     </form>
 
     <div class="msg" id="msg"></div>
   </div>
 
   <script>
+    let mode = 'api';
+    const tabApi = document.getElementById('tab-api');
+    const tabCsv = document.getElementById('tab-csv');
+    const paneApi = document.getElementById('pane-api');
+    const paneCsv = document.getElementById('pane-csv');
+
+    function setMode(m) {
+      mode = m;
+      tabApi.classList.toggle('active', m === 'api');
+      tabCsv.classList.toggle('active', m === 'csv');
+      paneApi.classList.toggle('hidden', m !== 'api');
+      paneCsv.classList.toggle('hidden', m !== 'csv');
+    }
+    tabApi.onclick = () => setMode('api');
+    tabCsv.onclick = () => setMode('csv');
+
     // По умолчанию — текущий сезон КХЛ (1 июля — 30 июня).
     (function () {
-      const now = new Date();
-      const y = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear();
+      const y = new Date().getFullYear();
       document.getElementById('from').value = (y - 1) + '-07-01';
       document.getElementById('to').value = y + '-06-30';
     })();
@@ -103,36 +143,65 @@
     const btn = document.getElementById('btn');
     const msg = document.getElementById('msg');
 
+    function readFile(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res({ name: file.name, content: r.result });
+        r.onerror = rej;
+        r.readAsText(file);
+      });
+    }
+
+    async function download(resp) {
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+      const name = m ? decodeURIComponent(m[1]) : 'khl_report.docx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      a.remove(); URL.revokeObjectURL(url);
+      return name;
+    }
+
+    async function errorText(resp) {
+      let detail = 'HTTP ' + resp.status;
+      try { detail = (await resp.json()).error || detail; } catch (_) {}
+      return detail;
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       msg.className = 'msg';
-      const from = document.getElementById('from').value;
-      const to = document.getElementById('to').value;
       const season = document.getElementById('season').value.trim();
-      const llm = document.getElementById('llm').checked ? '1' : '0';
-
-      const params = new URLSearchParams({ from, to, llm });
-      if (season) params.set('season', season);
+      const llm = document.getElementById('llm').checked;
 
       btn.disabled = true;
       btn.innerHTML = '<span class="spin"></span>' +
-        (llm === '1' ? 'Собираю данные и пишу текст…' : 'Собираю данные…');
+        (llm ? 'Собираю данные и пишу текст…' : 'Собираю данные…');
 
       try {
-        const resp = await fetch('/api/generate?' + params.toString());
-        if (!resp.ok) {
-          let detail = 'HTTP ' + resp.status;
-          try { detail = (await resp.json()).error || detail; } catch (_) {}
-          throw new Error(detail);
+        let resp;
+        if (mode === 'csv') {
+          const input = document.getElementById('files');
+          if (!input.files.length) throw new Error('Приложите хотя бы один CSV-файл.');
+          const files = await Promise.all([...input.files].map(readFile));
+          resp = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ season, llm, files }),
+          });
+        } else {
+          const params = new URLSearchParams({
+            from: document.getElementById('from').value,
+            to: document.getElementById('to').value,
+            llm: llm ? '1' : '0',
+          });
+          if (season) params.set('season', season);
+          resp = await fetch('/api/generate?' + params.toString());
         }
-        const blob = await resp.blob();
-        const cd = resp.headers.get('Content-Disposition') || '';
-        const m = cd.match(/filename\*=UTF-8''([^;]+)/);
-        const name = m ? decodeURIComponent(m[1]) : 'khl_report.docx';
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = name; document.body.appendChild(a); a.click();
-        a.remove(); URL.revokeObjectURL(url);
+        if (!resp.ok) throw new Error(await errorText(resp));
+        const name = await download(resp);
         msg.className = 'msg ok';
         msg.textContent = 'Готово: файл «' + name + '» скачан.';
       } catch (err) {

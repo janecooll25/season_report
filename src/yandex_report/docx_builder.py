@@ -51,17 +51,21 @@ def _assemble(
     # Сопроводительный абзац
     doc.add_paragraph(COVER_LETTER.format(season=season))
 
-    # Разделы
+    # Разделы (пропускаем те, для которых нет ни данных, ни текста —
+    # актуально для CSV-режима с частичным набором выгрузок)
     for section in SECTIONS:
+        block = blocks.get(section.id)
+        text = prose.get(section.id, "").strip()
+        if not block and not text:
+            continue
+
         doc.add_heading(section.heading.format(season=season), level=1)
 
-        text = prose.get(section.id, "").strip()
         if text:
             for para in text.split("\n\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
 
-        block = blocks.get(section.id)
         if block:
             if section.table_title:
                 cap = doc.add_paragraph()
