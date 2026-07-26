@@ -120,6 +120,14 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", "0") or "0")
         raw = self.rfile.read(length) if length else b"{}"
+        if "gzip" in (self.headers.get("Content-Encoding", "") or "").lower():
+            try:
+                import gzip
+
+                raw = gzip.decompress(raw)
+            except Exception:  # noqa: BLE001
+                self._json(400, {"error": "Не удалось распаковать сжатое тело запроса."})
+                return
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):

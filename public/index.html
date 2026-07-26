@@ -197,13 +197,35 @@
     const btn = document.getElementById('btn');
     const msg = document.getElementById('msg');
 
+    // Оставляем заголовок + строку «Итого и средние» + топ-200 строк данных
+    // (для отчёта нужны верхние значения, длинный «хвост» не нужен и раздувает запрос).
+    function trimCsv(text) {
+      const lines = text.split(/\r?\n/).filter((l) => l.length);
+      if (lines.length <= 220) return text;
+      const header = lines[0];
+      const rest = lines.slice(1);
+      const total = rest.filter((l) => l.includes('Итого и средние'));
+      const data = rest.filter((l) => !l.includes('Итого и средние')).slice(0, 200);
+      return [header, ...total, ...data].join('\n');
+    }
+
     function readFile(file) {
       return new Promise((res, rej) => {
         const r = new FileReader();
-        r.onload = () => res({ name: file.name, content: r.result });
+        r.onload = () => res({ name: file.name, content: trimCsv(r.result) });
         r.onerror = rej;
         r.readAsText(file);
       });
+    }
+
+    // Сжимаем тело запроса (CSV жмётся в разы) — обход лимита размера у Vercel.
+    async function gzipBody(str) {
+      if (typeof CompressionStream === 'undefined') return null;
+      const cs = new CompressionStream('gzip');
+      const w = cs.writable.getWriter();
+      w.write(new TextEncoder().encode(str));
+      w.close();
+      return new Uint8Array(await new Response(cs.readable).arrayBuffer());
     }
 
     async function download(resp) {
@@ -219,6 +241,10 @@
     }
 
     async function errorText(resp) {
+      if (resp.status === 413) {
+        return 'файлы слишком большие для загрузки. Оставьте меньше файлов за раз ' +
+               'или выгрузите из Метрики отчёты с меньшим числом строк.';
+      }
       let detail = 'HTTP ' + resp.status;
       try { detail = (await resp.json()).error || detail; } catch (_) {}
       return detail;
@@ -241,11 +267,12 @@
           const input = document.getElementById('files');
           if (!input.files.length) throw new Error('Приложите хотя бы один CSV-файл.');
           const files = await Promise.all([...input.files].map(readFile));
-          resp = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ season, llm, files, charts }),
-          });
+          const bodyStr = JSON.stringify({ season, llm, files, charts });
+          const gz = await gzipBody(bodyStr);
+          const headers = { 'Content-Type': 'application/json' };
+          let body = bodyStr;
+          if (gz) { headers['Content-Encoding'] = 'gzip'; body = gz; }
+          resp = await fetch('/api/generate', { method: 'POST', headers, body });
         } else {
           const params = new URLSearchParams({
             from: document.getElementById('from').value,
