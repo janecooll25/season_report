@@ -30,11 +30,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Строить из CSV-выгрузок Метрики (файлы или каталог) вместо API",
     )
     p.add_argument(
+        "--chart",
+        action="append",
+        default=[],
+        metavar="РАЗДЕЛ=ТИП",
+        help="Диаграмма в разделе, напр. --chart geo_countries=pie "
+             "(типы: bar, barh, pie, line). Можно указать несколько раз.",
+    )
+    p.add_argument(
         "--no-llm",
         action="store_true",
         help="Черновик без текста: только заголовки и таблицы (не нужен ANTHROPIC_API_KEY)",
     )
     return p.parse_args(argv)
+
+
+def _parse_charts(items: list[str]) -> dict[str, str]:
+    charts: dict[str, str] = {}
+    for item in items:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            if k.strip() and v.strip():
+                charts[k.strip()] = v.strip()
+    return charts
 
 
 def _csv_paths(items: list[str]) -> list[Path]:
@@ -74,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         season = args.season or auto_season or default_season()[2]
         counter_id = os.environ.get("YANDEX_METRIKA_COUNTER_ID", "—")
+        charts = _parse_charts(args.chart)
 
         prose: dict[str, str] = {}
         if not args.no_llm:
@@ -91,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         result = build_report(
             season=season, counter_id=counter_id,
             generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            blocks=blocks, prose=prose, output_path=output_path,
+            blocks=blocks, prose=prose, output_path=output_path, charts=charts,
         )
         print(f"Отчёт сохранён: {result}")
         return 0
@@ -134,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         blocks=blocks,
         prose=prose,
         output_path=output_path,
+        charts=_parse_charts(args.chart),
     )
     print(f"Отчёт сохранён: {result}")
     return 0

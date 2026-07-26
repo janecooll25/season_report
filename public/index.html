@@ -58,6 +58,14 @@
     .msg.err { display: block; background: var(--err-bg); color: var(--err-fg); }
     .msg.ok { display: block; background: rgba(11,92,173,.1); color: var(--accent); }
     .hidden { display: none; }
+    details.charts { margin-top: 18px; border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px; }
+    details.charts summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 8px 0; }
+    .chart-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+    .chart-row span { flex: 1; font-size: 13px; }
+    .chart-row select {
+      width: 160px; padding: 6px 8px; border: 1px solid var(--border);
+      border-radius: 7px; background: var(--bg); color: var(--fg); font-size: 13px;
+    }
     .spin {
       display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.4);
       border-top-color: #fff; border-radius: 50%; animation: r .7s linear infinite;
@@ -109,6 +117,11 @@
       </label>
       <p class="hint">Без галочки — быстрый черновик: только заголовки и таблицы.</p>
 
+      <details class="charts">
+        <summary>Диаграммы по разделам (необязательно)</summary>
+        <div id="chart-list"></div>
+      </details>
+
       <button type="submit" class="go" id="btn">Сформировать отчёт</button>
     </form>
 
@@ -116,6 +129,47 @@
   </div>
 
   <script>
+    // Разделы отчёта и типы диаграмм.
+    const SECTIONS = [
+      ['summary', 'Совокупные показатели'],
+      ['geo_countries', 'География: страны'],
+      ['geo_regions', 'География: регионы РФ'],
+      ['demography_age', 'Возраст'],
+      ['demography_gender', 'Пол'],
+      ['interests', 'Интересы (аффинити)'],
+      ['traffic_sources', 'Источники трафика'],
+      ['social', 'Соцсети'],
+      ['devices', 'Устройства'],
+      ['os', 'Операционные системы'],
+    ];
+    const CHART_TYPES = [
+      ['', 'Нет'], ['bar', 'Столбчатая'], ['barh', 'Горизонтальная'],
+      ['pie', 'Круговая'], ['line', 'Линейная'],
+    ];
+    (function buildCharts() {
+      const list = document.getElementById('chart-list');
+      for (const [id, label] of SECTIONS) {
+        const row = document.createElement('div');
+        row.className = 'chart-row';
+        const span = document.createElement('span');
+        span.textContent = label;
+        const sel = document.createElement('select');
+        sel.dataset.section = id;
+        for (const [v, t] of CHART_TYPES) {
+          const o = document.createElement('option');
+          o.value = v; o.textContent = t; sel.appendChild(o);
+        }
+        row.appendChild(span); row.appendChild(sel); list.appendChild(row);
+      }
+    })();
+    function collectCharts() {
+      const charts = {};
+      document.querySelectorAll('#chart-list select').forEach((s) => {
+        if (s.value) charts[s.dataset.section] = s.value;
+      });
+      return charts;
+    }
+
     let mode = 'api';
     const tabApi = document.getElementById('tab-api');
     const tabCsv = document.getElementById('tab-csv');
@@ -180,6 +234,7 @@
       btn.innerHTML = '<span class="spin"></span>' +
         (llm ? 'Собираю данные и пишу текст…' : 'Собираю данные…');
 
+      const charts = collectCharts();
       try {
         let resp;
         if (mode === 'csv') {
@@ -189,7 +244,7 @@
           resp = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ season, llm, files }),
+            body: JSON.stringify({ season, llm, files, charts }),
           });
         } else {
           const params = new URLSearchParams({
@@ -198,6 +253,8 @@
             llm: llm ? '1' : '0',
           });
           if (season) params.set('season', season);
+          const chartStr = Object.entries(charts).map(([k, v]) => k + ':' + v).join(',');
+          if (chartStr) params.set('charts', chartStr);
           resp = await fetch('/api/generate?' + params.toString());
         }
         if (!resp.ok) throw new Error(await errorText(resp));

@@ -1,11 +1,12 @@
 """Сборка нового docx-отчёта из структуры, данных и сгенерированного текста."""
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt
+from docx.shared import Inches
 
 from .report_data import DataBlock
 from .structure import COVER_LETTER, SECTIONS, Section, appendix_title
@@ -29,6 +30,18 @@ def _add_table(doc: Document, block: DataBlock) -> None:
             cells[i].text = str(val)
 
 
+def _add_chart(doc: Document, block: DataBlock, chart_type: str, title: str) -> None:
+    try:
+        from .charts import render_chart
+
+        png = render_chart(block, chart_type, title)
+    except Exception:  # noqa: BLE001 — диаграмма не должна ронять отчёт
+        png = None
+    if png:
+        doc.add_picture(BytesIO(png), width=Inches(5.8))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
 def _assemble(
     *,
     season: str,
@@ -36,7 +49,9 @@ def _assemble(
     generated_at: str,
     blocks: dict[str, DataBlock],
     prose: dict[str, str],
+    charts: dict[str, str] | None = None,
 ) -> Document:
+    charts = charts or {}
     doc = Document()
 
     # Титул приложения
@@ -72,6 +87,11 @@ def _assemble(
                 cap.add_run(section.table_title).italic = True
             _add_table(doc, block)
 
+            chart_type = (charts.get(section.id) or "").strip()
+            if chart_type:
+                _add_chart(doc, block, chart_type,
+                           section.table_title or section.heading.format(season=season))
+
     note = doc.add_paragraph()
     note.add_run(
         "Данные приведены из системы Яндекс.Метрика. Разделы по мобильному "
@@ -90,6 +110,7 @@ def build_report(
     blocks: dict[str, DataBlock],
     prose: dict[str, str],
     output_path: str | Path,
+    charts: dict[str, str] | None = None,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +120,7 @@ def build_report(
         generated_at=generated_at,
         blocks=blocks,
         prose=prose,
+        charts=charts,
     )
     doc.save(str(output_path))
     return output_path
@@ -111,16 +133,16 @@ def build_report_bytes(
     generated_at: str,
     blocks: dict[str, DataBlock],
     prose: dict[str, str],
+    charts: dict[str, str] | None = None,
 ) -> bytes:
     """Собирает отчёт в память и возвращает байты .docx (для веб-выдачи)."""
-    from io import BytesIO
-
     doc = _assemble(
         season=season,
         counter_id=counter_id,
         generated_at=generated_at,
         blocks=blocks,
         prose=prose,
+        charts=charts,
     )
     buf = BytesIO()
     doc.save(buf)

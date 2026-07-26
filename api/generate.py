@@ -60,6 +60,7 @@ def _generate(params: dict[str, list[str]]) -> tuple[str, bytes]:
         d1, d2, auto_season = default_season()
         season = season or auto_season
 
+    charts = _charts_from_query(params.get("charts", [""])[0])
     client = MetrikaClient(config.token, config.counter_id)
     blocks = collect(client, d1, d2)
     prose = _prose(blocks, season, use_llm)
@@ -70,8 +71,20 @@ def _generate(params: dict[str, list[str]]) -> tuple[str, bytes]:
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
         blocks=blocks,
         prose=prose,
+        charts=charts,
     )
     return f"khl_report_{season.replace('/', '_')}.docx", data
+
+
+def _charts_from_query(raw: str) -> dict[str, str]:
+    """'geo_countries:pie,os:bar' -> {'geo_countries':'pie', 'os':'bar'}."""
+    out: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            if k.strip() and v.strip():
+                out[k.strip()] = v.strip()
+    return out
 
 
 def _generate_from_csv(payload: dict) -> tuple[str, bytes]:
@@ -82,6 +95,7 @@ def _generate_from_csv(payload: dict) -> tuple[str, bytes]:
     if not files:
         raise CsvError("Не приложено ни одного CSV-файла.")
     use_llm = bool(payload.get("llm", True))
+    charts = payload.get("charts") or {}
 
     blocks, auto_season = load_blocks_from_files(files)
     season = (payload.get("season") or "").strip() or auto_season or default_season()[2]
@@ -93,6 +107,7 @@ def _generate_from_csv(payload: dict) -> tuple[str, bytes]:
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
         blocks=blocks,
         prose=prose,
+        charts=charts if isinstance(charts, dict) else {},
     )
     return f"khl_report_{season.replace('/', '_')}.docx", data
 
