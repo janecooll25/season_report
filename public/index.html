@@ -82,6 +82,7 @@
     <div class="tabs">
       <button type="button" id="tab-api" class="active">API Метрики</button>
       <button type="button" id="tab-csv">CSV-выгрузки</button>
+      <button type="button" id="tab-tickets">Билеты (метрики)</button>
     </div>
 
     <form id="f">
@@ -107,22 +108,35 @@
           сезон (диапазон дат в имени файла определит, какой из них текущий).</p>
       </div>
 
+      <!-- Билеты -->
+      <div id="pane-tickets" class="hidden">
+        <label for="xlsx">Файл xlsx с данными по билетам</label>
+        <input type="file" id="xlsx" accept=".xlsx" />
+        <p class="hint">Листы «Реализованные билеты», «Доход…», «Агенты…».
+          В результат добавится лист «Расчеты» с метриками.</p>
+        <label for="capacity">Вместимость арены, чел.</label>
+        <input type="text" id="capacity" placeholder="напр. 8965" inputmode="numeric" />
+        <p class="hint">Если пусто — возьмётся максимальная посещаемость за матч.</p>
+      </div>
+
       <label for="season">Метка сезона</label>
       <input type="text" id="season" placeholder="2025/2026" />
       <p class="hint">Подставляется в заголовки. По умолчанию — по датам данных.</p>
 
-      <label class="check">
-        <input type="checkbox" id="llm" checked />
-        Сгенерировать аналитический текст (Claude)
-      </label>
-      <p class="hint">Без галочки — быстрый черновик: только заголовки и таблицы.</p>
+      <div id="report-only">
+        <label class="check">
+          <input type="checkbox" id="llm" checked />
+          Сгенерировать аналитический текст (Claude)
+        </label>
+        <p class="hint">Без галочки — быстрый черновик: только заголовки и таблицы.</p>
 
-      <details class="charts">
-        <summary>Диаграммы по разделам (необязательно)</summary>
-        <div id="chart-list"></div>
-      </details>
+        <details class="charts">
+          <summary>Диаграммы по разделам (необязательно)</summary>
+          <div id="chart-list"></div>
+        </details>
+      </div>
 
-      <button type="submit" class="go" id="btn">Сформировать отчёт</button>
+      <button type="submit" class="go" id="btn">Сформировать</button>
     </form>
 
     <div class="msg" id="msg"></div>
@@ -173,18 +187,27 @@
     let mode = 'api';
     const tabApi = document.getElementById('tab-api');
     const tabCsv = document.getElementById('tab-csv');
+    const tabTickets = document.getElementById('tab-tickets');
     const paneApi = document.getElementById('pane-api');
     const paneCsv = document.getElementById('pane-csv');
+    const paneTickets = document.getElementById('pane-tickets');
 
     function setMode(m) {
       mode = m;
       tabApi.classList.toggle('active', m === 'api');
       tabCsv.classList.toggle('active', m === 'csv');
+      tabTickets.classList.toggle('active', m === 'tickets');
       paneApi.classList.toggle('hidden', m !== 'api');
       paneCsv.classList.toggle('hidden', m !== 'csv');
+      paneTickets.classList.toggle('hidden', m !== 'tickets');
+      // Текст и диаграммы — только для отчёта по аудитории.
+      document.getElementById('report-only').classList.toggle('hidden', m === 'tickets');
+      document.getElementById('btn').textContent =
+        m === 'tickets' ? 'Рассчитать метрики' : 'Сформировать отчёт';
     }
     tabApi.onclick = () => setMode('api');
     tabCsv.onclick = () => setMode('csv');
+    tabTickets.onclick = () => setMode('tickets');
 
     // По умолчанию — текущий сезон КХЛ (1 июля — 30 июня).
     (function () {
@@ -215,6 +238,15 @@
         r.onload = () => res({ name: file.name, content: trimCsv(r.result) });
         r.onerror = rej;
         r.readAsText(file);
+      });
+    }
+
+    function readBase64(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(',')[1] || '');
+        r.onerror = rej;
+        r.readAsDataURL(file);
       });
     }
 
@@ -263,7 +295,17 @@
       const charts = collectCharts();
       try {
         let resp;
-        if (mode === 'csv') {
+        if (mode === 'tickets') {
+          const input = document.getElementById('xlsx');
+          if (!input.files.length) throw new Error('Приложите файл xlsx.');
+          const b64 = await readBase64(input.files[0]);
+          const capacity = document.getElementById('capacity').value.replace(/\D/g, '');
+          resp = await fetch('/api/tickets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content_b64: b64, capacity, season }),
+          });
+        } else if (mode === 'csv') {
           const input = document.getElementById('files');
           if (!input.files.length) throw new Error('Приложите хотя бы один CSV-файл.');
           const files = await Promise.all([...input.files].map(readFile));

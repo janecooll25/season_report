@@ -42,6 +42,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Черновик без текста: только заголовки и таблицы (не нужен ANTHROPIC_API_KEY)",
     )
+    p.add_argument(
+        "--tickets",
+        metavar="XLSX",
+        help="Отдельный режим: рассчитать метрики билетной программы из xlsx",
+    )
+    p.add_argument("--capacity", type=int, help="Вместимость арены (для режима --tickets)")
     return p.parse_args(argv)
 
 
@@ -82,6 +88,25 @@ def _write_prose(blocks, season, api_key, model) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+
+    # --- Режим билетных метрик ---
+    if args.tickets:
+        from .ticket_metrics import TicketError, build_calculations
+
+        try:
+            data = build_calculations(
+                Path(args.tickets).read_bytes(),
+                capacity=args.capacity,
+                season_label=args.season or "2025/2026",
+            )
+        except (TicketError, OSError) as exc:
+            print(f"Ошибка: {exc}", file=sys.stderr)
+            return 1
+        output_path = Path(args.output) if args.output else Path("output/tickets_calc.xlsx")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(data)
+        print(f"Файл с расчётами сохранён: {output_path}")
+        return 0
 
     # --- Режим CSV ---
     if args.from_csv:
