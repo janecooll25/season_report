@@ -124,22 +124,24 @@ _HDRFILL = PatternFill("solid", fgColor="E2E5EA")
 
 
 PROTOCOL_HEADER = "Посещаемость по протоколу"
+PROTOCOL_COL = "M"          # столбец для протокольной посещаемости
+PROTOCOL_COL_IDX = 13       # M
 
 
 def _prep_protocol_column(rz, reg, po) -> None:
-    """Столбец L: заголовок «Посещаемость по протоколу», 0 в строках матчей."""
+    """Столбец M: заголовок «Посещаемость по протоколу», 0 в строках матчей."""
     # Заголовок — в строке с «№ игры».
     for i in range(1, rz.max_row + 1):
         a = rz.cell(i, 1).value
         if isinstance(a, str) and a.strip() == "№ игры":
-            rz.cell(i, 12).value = PROTOCOL_HEADER
+            rz.cell(i, PROTOCOL_COL_IDX).value = PROTOCOL_HEADER
             break
     for span in (reg, po):
         if not span:
             continue
         for r in range(span[0], span[1] + 1):
-            if rz.cell(r, 12).value in (None, ""):
-                rz.cell(r, 12).value = 0
+            if rz.cell(r, PROTOCOL_COL_IDX).value in (None, ""):
+                rz.cell(r, PROTOCOL_COL_IDX).value = 0
 
 
 def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
@@ -220,8 +222,9 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(16, "Бесплатные места в ложах", _both(RZ, "J", rz_reg, rz_po), "шт.", "гр. J")
 
     # Посещаемость по протоколу и отклонение (столбец L — заполняется клубом).
-    metric(17, "Посещаемость по протоколу (за сезон)", _both(RZ, "L", rz_reg, rz_po),
-           "чел.", "гр. L — из официального протокола матча")
+    metric(17, "Посещаемость по протоколу (за сезон)",
+           _both(RZ, PROTOCOL_COL, rz_reg, rz_po),
+           "чел.", "гр. M — из официального протокола матча")
 
     free_no_abon =(f"({_both(RZ, 'D', rz_reg, rz_po)}+{_both(RZ, 'H', rz_reg, rz_po)}"
                     f"+{_both(RZ, 'J', rz_reg, rz_po)})")
@@ -231,7 +234,7 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(19, "Доля бесплатных билетов", f"IFERROR({free_no_abon}/{paid_base},0)", "%",
            "бесплатные / (проходы − абонементы)", fmt=PCT)
     metric(20, "Расхождение: факт − заявлено (билеты)",
-           f"({_both(RZ, 'L', rz_reg, rz_po)}-{_both(RZ, 'K', rz_reg, rz_po)})", "чел.",
+           f"({_both(RZ, PROTOCOL_COL, rz_reg, rz_po)}-{_both(RZ, 'K', rz_reg, rz_po)})", "чел.",
            "посещаемость по протоколу − всего реализовано билетов")
 
     metric(21, "Матчей регулярного чемпионата", _count(RZ, rz_reg), "шт.")
@@ -244,7 +247,7 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
            f"IFERROR({_both(RZ, 'K', rz_reg, rz_po)}/({_count(RZ, rz_reg)}+{_count(RZ, rz_po)}),0)",
            "зрит./матч")
     metric(26, "Расхождение факта с заявленным, %",
-           f"IFERROR(({_both(RZ, 'L', rz_reg, rz_po)}-{_both(RZ, 'K', rz_reg, rz_po)})"
+           f"IFERROR(({_both(RZ, PROTOCOL_COL, rz_reg, rz_po)}-{_both(RZ, 'K', rz_reg, rz_po)})"
            f"/{_both(RZ, 'K', rz_reg, rz_po)},0)", "%",
            "(протокол − всего билетов) / всего билетов", fmt=PCT)
 

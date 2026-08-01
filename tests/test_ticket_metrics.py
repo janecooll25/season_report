@@ -75,16 +75,16 @@ def test_protocol_column_and_deviation_metric():
     out = build_calculations(_make_raw(), capacity=200, season_label="2025/2026")
     wb = openpyxl.load_workbook(BytesIO(out))
     rz = wb[RZ]
-    # заголовок столбца L и нули в строках матчей
-    assert rz.cell(2, 12).value == "Посещаемость по протоколу"
-    assert rz.cell(5, 12).value == 0
-    assert rz.cell(6, 12).value == 0
-    assert rz.cell(8, 12).value == 0
+    # заголовок столбца M и нули в строках матчей
+    assert rz.cell(2, 13).value == "Посещаемость по протоколу"
+    assert rz.cell(5, 13).value == 0
+    assert rz.cell(6, 13).value == 0
+    assert rz.cell(8, 13).value == 0
     calc = wb["Расчеты"]
-    # абсолютное расхождение: факт(L) − заявлено(K)
+    # абсолютное расхождение: факт(M) − заявлено(K)
     assert calc["B20"].value == "Расхождение: факт − заявлено (билеты)"
     assert calc["C20"].value == (
-        "=((SUM('Реализованные билеты'!L5:L6)+SUM('Реализованные билеты'!L8:L8))"
+        "=((SUM('Реализованные билеты'!M5:M6)+SUM('Реализованные билеты'!M8:M8))"
         "-(SUM('Реализованные билеты'!K5:K6)+SUM('Реализованные билеты'!K8:K8)))"
     )
     # относительное расхождение, %
