@@ -123,6 +123,25 @@ _SECFILL = PatternFill("solid", fgColor="0B5CAD")
 _HDRFILL = PatternFill("solid", fgColor="E2E5EA")
 
 
+PROTOCOL_HEADER = "Посещаемость по протоколу"
+
+
+def _prep_protocol_column(rz, reg, po) -> None:
+    """Столбец L: заголовок «Посещаемость по протоколу», 0 в строках матчей."""
+    # Заголовок — в строке с «№ игры».
+    for i in range(1, rz.max_row + 1):
+        a = rz.cell(i, 1).value
+        if isinstance(a, str) and a.strip() == "№ игры":
+            rz.cell(i, 12).value = PROTOCOL_HEADER
+            break
+    for span in (reg, po):
+        if not span:
+            continue
+        for r in range(span[0], span[1] + 1):
+            if rz.cell(r, 12).value in (None, ""):
+                rz.cell(r, 12).value = 0
+
+
 def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     rz = wb[RZ]
     dh = wb[DH]
@@ -133,6 +152,7 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
 
     rz_reg, rz_po = _section_spans(rz)
     dh_reg, dh_po = _section_spans(dh)
+    _prep_protocol_column(rz, rz_reg, rz_po)
 
     if CALC in wb.sheetnames:
         del wb[CALC]
@@ -199,13 +219,20 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(15, "Платные места в ложах", _both(RZ, "I", rz_reg, rz_po), "шт.", "гр. I")
     metric(16, "Бесплатные места в ложах", _both(RZ, "J", rz_reg, rz_po), "шт.", "гр. J")
 
-    free_no_abon = (f"({_both(RZ, 'D', rz_reg, rz_po)}+{_both(RZ, 'H', rz_reg, rz_po)}"
+    # Посещаемость по протоколу и отклонение (столбец L — заполняется клубом).
+    metric(17, "Посещаемость по протоколу (за сезон)", _both(RZ, "L", rz_reg, rz_po),
+           "чел.", "гр. L — из официального протокола матча")
+
+    free_no_abon =(f"({_both(RZ, 'D', rz_reg, rz_po)}+{_both(RZ, 'H', rz_reg, rz_po)}"
                     f"+{_both(RZ, 'J', rz_reg, rz_po)})")
     paid_base = (f"({_both(RZ, 'K', rz_reg, rz_po)}-{_both(RZ, 'E', rz_reg, rz_po)}"
                  f"-{_both(RZ, 'F', rz_reg, rz_po)})")
     metric(18, "Всего бесплатных билетов (без абонементов)", free_no_abon, "шт.")
     metric(19, "Доля бесплатных билетов", f"IFERROR({free_no_abon}/{paid_base},0)", "%",
            "бесплатные / (проходы − абонементы)", fmt=PCT)
+    metric(20, "Отклонение от протокола",
+           f"IFERROR({_both(RZ, 'L', rz_reg, rz_po)}/{_both(RZ, 'K', rz_reg, rz_po)},0)", "%",
+           "посещаемость по протоколу / всего билетов", fmt=PCT)
 
     metric(21, "Матчей регулярного чемпионата", _count(RZ, rz_reg), "шт.")
     metric(22, "Матчей плей-офф", _count(RZ, rz_po), "шт.")

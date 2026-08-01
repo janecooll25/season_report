@@ -71,6 +71,24 @@ def test_calc_formulas_reference_correct_ranges():
     assert ws["H2"].value == 200
 
 
+def test_protocol_column_and_deviation_metric():
+    out = build_calculations(_make_raw(), capacity=200, season_label="2025/2026")
+    wb = openpyxl.load_workbook(BytesIO(out))
+    rz = wb[RZ]
+    # заголовок столбца L и нули в строках матчей
+    assert rz.cell(2, 12).value == "Посещаемость по протоколу"
+    assert rz.cell(5, 12).value == 0
+    assert rz.cell(6, 12).value == 0
+    assert rz.cell(8, 12).value == 0
+    calc = wb["Расчеты"]
+    assert calc["B20"].value == "Отклонение от протокола"
+    assert calc["C20"].value == (
+        "=IFERROR((SUM('Реализованные билеты'!L5:L6)"
+        "+SUM('Реализованные билеты'!L8:L8))/(SUM('Реализованные билеты'!K5:K6)"
+        "+SUM('Реализованные билеты'!K8:K8)),0)"
+    )
+
+
 def test_missing_required_sheet_raises():
     wb = openpyxl.Workbook()
     buf = BytesIO(); wb.save(buf)
