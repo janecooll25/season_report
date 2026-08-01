@@ -230,9 +230,9 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(18, "Всего бесплатных билетов (без абонементов)", free_no_abon, "шт.")
     metric(19, "Доля бесплатных билетов", f"IFERROR({free_no_abon}/{paid_base},0)", "%",
            "бесплатные / (проходы − абонементы)", fmt=PCT)
-    metric(20, "Отклонение от протокола",
-           f"IFERROR({_both(RZ, 'L', rz_reg, rz_po)}/{_both(RZ, 'K', rz_reg, rz_po)},0)", "%",
-           "посещаемость по протоколу / всего билетов", fmt=PCT)
+    metric(20, "Расхождение: факт − заявлено (билеты)",
+           f"({_both(RZ, 'L', rz_reg, rz_po)}-{_both(RZ, 'K', rz_reg, rz_po)})", "чел.",
+           "посещаемость по протоколу − всего реализовано билетов")
 
     metric(21, "Матчей регулярного чемпионата", _count(RZ, rz_reg), "шт.")
     metric(22, "Матчей плей-офф", _count(RZ, rz_po), "шт.")
@@ -243,6 +243,10 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(25, "Средняя посещаемость (сезон)",
            f"IFERROR({_both(RZ, 'K', rz_reg, rz_po)}/({_count(RZ, rz_reg)}+{_count(RZ, rz_po)}),0)",
            "зрит./матч")
+    metric(26, "Расхождение факта с заявленным, %",
+           f"IFERROR(({_both(RZ, 'L', rz_reg, rz_po)}-{_both(RZ, 'K', rz_reg, rz_po)})"
+           f"/{_both(RZ, 'K', rz_reg, rz_po)},0)", "%",
+           "(протокол − всего билетов) / всего билетов", fmt=PCT)
 
     metric(27, "Вместимость арены", CAP, "мест", "изменяемый параметр в ячейке H2")
     metric(28, "Суммарная посещаемость (регулярка)", _sum(RZ, "K", rz_reg), "зрит.")

@@ -81,12 +81,15 @@ def test_protocol_column_and_deviation_metric():
     assert rz.cell(6, 12).value == 0
     assert rz.cell(8, 12).value == 0
     calc = wb["Расчеты"]
-    assert calc["B20"].value == "Отклонение от протокола"
+    # абсолютное расхождение: факт(L) − заявлено(K)
+    assert calc["B20"].value == "Расхождение: факт − заявлено (билеты)"
     assert calc["C20"].value == (
-        "=IFERROR((SUM('Реализованные билеты'!L5:L6)"
-        "+SUM('Реализованные билеты'!L8:L8))/(SUM('Реализованные билеты'!K5:K6)"
-        "+SUM('Реализованные билеты'!K8:K8)),0)"
+        "=((SUM('Реализованные билеты'!L5:L6)+SUM('Реализованные билеты'!L8:L8))"
+        "-(SUM('Реализованные билеты'!K5:K6)+SUM('Реализованные билеты'!K8:K8)))"
     )
+    # относительное расхождение, %
+    assert calc["B26"].value == "Расхождение факта с заявленным, %"
+    assert "IFERROR" in calc["C26"].value and calc["C26"].value.endswith(",0)")
 
 
 def test_missing_required_sheet_raises():
