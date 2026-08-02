@@ -83,6 +83,7 @@
       <button type="button" id="tab-api" class="active">API Метрики</button>
       <button type="button" id="tab-csv">CSV-выгрузки</button>
       <button type="button" id="tab-tickets">Билеты (метрики)</button>
+      <button type="button" id="tab-agg">Агрегат по клубам</button>
     </div>
 
     <form id="f">
@@ -117,6 +118,14 @@
         <label for="capacity">Вместимость арены, чел.</label>
         <input type="text" id="capacity" placeholder="напр. 8965" inputmode="numeric" />
         <p class="hint">Если пусто — возьмётся максимальная посещаемость за матч.</p>
+      </div>
+
+      <!-- Агрегат по клубам -->
+      <div id="pane-agg" class="hidden">
+        <label for="xlsx-agg">Файлы клубов (xlsx, до 22)</label>
+        <input type="file" id="xlsx-agg" accept=".xlsx" multiple />
+        <p class="hint">По одному файлу на клуб. Считается отчёт со средними
+          показателями по клубам (отдельная книга «Средние по клубам»).</p>
       </div>
 
       <label for="season">Метка сезона</label>
@@ -188,26 +197,34 @@
     const tabApi = document.getElementById('tab-api');
     const tabCsv = document.getElementById('tab-csv');
     const tabTickets = document.getElementById('tab-tickets');
+    const tabAgg = document.getElementById('tab-agg');
     const paneApi = document.getElementById('pane-api');
     const paneCsv = document.getElementById('pane-csv');
     const paneTickets = document.getElementById('pane-tickets');
+    const paneAgg = document.getElementById('pane-agg');
 
     function setMode(m) {
       mode = m;
       tabApi.classList.toggle('active', m === 'api');
       tabCsv.classList.toggle('active', m === 'csv');
       tabTickets.classList.toggle('active', m === 'tickets');
+      tabAgg.classList.toggle('active', m === 'agg');
       paneApi.classList.toggle('hidden', m !== 'api');
       paneCsv.classList.toggle('hidden', m !== 'csv');
       paneTickets.classList.toggle('hidden', m !== 'tickets');
+      paneAgg.classList.toggle('hidden', m !== 'agg');
+      const isTickets = m === 'tickets' || m === 'agg';
       // Текст и диаграммы — только для отчёта по аудитории.
-      document.getElementById('report-only').classList.toggle('hidden', m === 'tickets');
+      document.getElementById('report-only').classList.toggle('hidden', isTickets);
       document.getElementById('btn').textContent =
-        m === 'tickets' ? 'Рассчитать метрики' : 'Сформировать отчёт';
+        m === 'tickets' ? 'Рассчитать метрики'
+        : m === 'agg' ? 'Собрать агрегат'
+        : 'Сформировать отчёт';
     }
     tabApi.onclick = () => setMode('api');
     tabCsv.onclick = () => setMode('csv');
     tabTickets.onclick = () => setMode('tickets');
+    tabAgg.onclick = () => setMode('agg');
 
     // По умолчанию — текущий сезон КХЛ (1 июля — 30 июня).
     (function () {
@@ -305,6 +322,19 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content_b64: b64, capacity, season }),
           });
+        } else if (mode === 'agg') {
+          const input = document.getElementById('xlsx-agg');
+          if (!input.files.length) throw new Error('Приложите хотя бы один файл клуба.');
+          if (input.files.length > 22) throw new Error('Не больше 22 файлов за раз.');
+          const files = await Promise.all([...input.files].map(async (f) => ({
+            name: f.name, content_b64: await readBase64(f),
+          })));
+          const bodyStr = JSON.stringify({ files, season });
+          const gz = await gzipBody(bodyStr);
+          const headers = { 'Content-Type': 'application/json' };
+          let body = bodyStr;
+          if (gz) { headers['Content-Encoding'] = 'gzip'; body = gz; }
+          resp = await fetch('/api/aggregate', { method: 'POST', headers, body });
         } else if (mode === 'csv') {
           const input = document.getElementById('files');
           if (!input.files.length) throw new Error('Приложите хотя бы один CSV-файл.');

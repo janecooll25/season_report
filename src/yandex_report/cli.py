@@ -48,6 +48,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Отдельный режим: рассчитать метрики билетной программы из xlsx",
     )
     p.add_argument("--capacity", type=int, help="Вместимость арены (для режима --tickets)")
+    p.add_argument(
+        "--aggregate",
+        nargs="+",
+        metavar="XLSX",
+        help="Агрегированный отчёт по клубам (несколько xlsx или каталог)",
+    )
     return p.parse_args(argv)
 
 
@@ -88,6 +94,28 @@ def _write_prose(blocks, season, api_key, model) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+
+    # --- Режим агрегата по клубам ---
+    if args.aggregate:
+        from .club_aggregate import aggregate_clubs
+        from .ticket_metrics import TicketError
+
+        paths: list[Path] = []
+        for item in args.aggregate:
+            p = Path(item)
+            paths.extend(sorted(p.glob("*.xlsx")) if p.is_dir() else [p])
+        files = [(p.name, p.read_bytes()) for p in paths]
+        try:
+            data = aggregate_clubs(files, capacity=args.capacity,
+                                   season_label=args.season or "2025/2026")
+        except (TicketError, OSError) as exc:
+            print(f"Ошибка: {exc}", file=sys.stderr)
+            return 1
+        output_path = Path(args.output) if args.output else Path("output/clubs_aggregate.xlsx")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(data)
+        print(f"Агрегированный отчёт сохранён: {output_path}")
+        return 0
 
     # --- Режим билетных метрик ---
     if args.tickets:

@@ -10,6 +10,11 @@
       "maxDuration": 30,
       "memory": 1024,
       "includeFiles": "src/**"
+    },
+    "api/aggregate.py": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "src/**"
     }
   }
 }
