@@ -21,20 +21,23 @@ def test_compute_club_metrics_basic():
     assert m["online_share"] == pytest.approx(300 / 400)  # онлайн 300 из 400
 
 
-def test_aggregate_averages_across_clubs():
-    # два «клуба» с одинаковыми данными → среднее = значение клуба
+def test_aggregate_has_four_params_with_grades():
     files = [("HC_A.xlsx", _make_raw()), ("HC_B.xlsx", _make_raw())]
     out = aggregate_clubs(files, capacity=200, season_label="2025/2026")
     ws = openpyxl.load_workbook(BytesIO(out)).active
     assert ws.title == "Средние по клубам"
     assert "Клубов в выборке: 2" in ws["A2"].value
-    # заголовки колонок клубов
-    assert ws.cell(4, 4).value == "HC A"
-    assert ws.cell(4, 5).value == "HC B"
-    # строка «Посещаемость за сезон»: среднее = 627
-    labels = {ws.cell(r, 1).value: r for r in range(5, ws.max_row + 1)}
-    r = labels["Посещаемость за сезон (всего проходов)"]
-    assert ws.cell(r, 2).value == 627
+
+    col_a = [ws.cell(r, 1).value for r in range(1, ws.max_row + 1)]
+    # 4 параметра-секции
+    assert any("Средняя цена билета (регулярный чемпионат)" in str(v) for v in col_a)
+    assert any("Доля продаж билетов онлайн" in str(v) for v in col_a)
+    assert any("Доля бесплатных билетов" in str(v) for v in col_a)
+    assert any("Фактическое отклонение посещаемости" in str(v) for v in col_a)
+    # клубы и градация присутствуют
+    assert "HC A" in col_a and "HC B" in col_a
+    grades = [ws.cell(r, 4).value for r in range(1, ws.max_row + 1)]
+    assert any("показатели" in str(g) for g in grades)
 
 
 def test_too_many_files_raises():

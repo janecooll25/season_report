@@ -41,24 +41,13 @@ def _both(fn, ws, col, reg, po) -> float:
     return fn(ws, col, reg) + fn(ws, col, po)
 
 
-# Метрики агрегата: (ключ, подпись, единица, доля?).
-METRICS: list[tuple[str, str, str, bool]] = [
-    ("att_season", "Посещаемость за сезон (всего проходов)", "чел.", False),
-    ("att_avg_season", "Средняя посещаемость (сезон)", "зрит./матч", False),
-    ("att_avg_reg", "Средняя посещаемость (регулярка)", "зрит./матч", False),
-    ("matches", "Матчей за сезон", "шт.", False),
-    ("paid_single", "Платные билеты (разовые)", "шт.", False),
-    ("free_single", "Бесплатные билеты (разовые)", "шт.", False),
-    ("free_share", "Доля бесплатных билетов", "%", True),
-    ("abon_paid", "Платных абонементов (продано)", "шт.", False),
-    ("fill_reg", "Заполняемость арены (регулярка)", "%", True),
-    ("income_total", "Доход — всего за сезон", "руб.", False),
-    ("income_paid", "Доход от платных билетов", "руб.", False),
-    ("income_abon", "Доход от абонементов", "руб.", False),
-    ("price_season", "Средняя цена платного билета (сезон)", "руб.", False),
-    ("abon_price", "Стоимость абонемента (сезон)", "руб.", False),
-    ("online_share", "Доля онлайн-продаж", "%", True),
-    ("commission", "Агентская комиссия (средняя)", "%", True),
+# Параметры агрегата: (ключ, подпись, единица, направление, доля?).
+# direction: "desc" — выше = лучше (место 1 — максимум); "asc" — ниже = лучше.
+PARAMS: list[tuple[str, str, str, str, bool]] = [
+    ("price_reg", "Средняя цена билета (регулярный чемпионат)", "руб.", "desc", False),
+    ("online_share", "Доля продаж билетов онлайн", "%", "desc", True),
+    ("free_share", "Доля бесплатных билетов", "%", "asc", True),
+    ("deviation", "Фактическое отклонение посещаемости", "%", "asc", True),
 ]
 
 
@@ -120,10 +109,15 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None) -> dic
     income_abon = _both(_sum_col, dh, 5, dh_reg, dh_po)
     income_total = _income_total(dh_reg) + _income_total(dh_po)
 
-    price_reg_base = _sum_col(rz, 3, rz_reg)
-    price_season_base = paid_single
-    price_season = income_paid / price_season_base if price_season_base else None
+    paid_reg = _sum_col(rz, 3, rz_reg)
+    income_paid_reg = _sum_col(dh, 4, dh_reg)
+    price_reg = income_paid_reg / paid_reg if paid_reg else None
+    price_season = income_paid / paid_single if paid_single else None
     abon_price = income_abon / abon_paid if abon_paid else None
+
+    # Фактическое отклонение посещаемости: |протокол (M=13) − билеты| / билеты.
+    protocol = _both(_sum_col, rz, 13, rz_reg, rz_po)
+    deviation = abs(protocol - att_season) / att_season if (protocol and att_season) else None
 
     # Каналы и комиссия.
     online = offline = 0.0
@@ -160,9 +154,11 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None) -> dic
         "income_paid": income_paid,
         "income_abon": income_abon,
         "price_season": price_season,
+        "price_reg": price_reg,
         "abon_price": abon_price,
         "online_share": online_share,
         "commission": commission,
+        "deviation": deviation,
     }
 
 
@@ -177,16 +173,33 @@ def _club_name(filename: str) -> str:
 # ── стили ────────────────────────────────────────────────────────────────
 _FONT = "Arial"
 _H = Font(name=_FONT, bold=True, size=13)
+_SEC = Font(name=_FONT, bold=True, size=11, color="FFFFFF")
 _HDR = Font(name=_FONT, bold=True)
 _REG = Font(name=_FONT)
 _HDRFILL = PatternFill("solid", fgColor="E2E5EA")
+_SECFILL = PatternFill("solid", fgColor="0B5CAD")
+_GRADE_FILL = {
+    "Хорошие показатели": PatternFill("solid", fgColor="E4F4E4"),
+    "Удовлетворительные показатели": PatternFill("solid", fgColor="FCF4DD"),
+    "Неудовлетворительные показатели": PatternFill("solid", fgColor="FBE4E4"),
+}
+
+
+def _grade(rank: int, n: int) -> str:
+    import math
+    if rank <= math.ceil(n / 3):
+        return "Хорошие показатели"
+    if rank <= math.ceil(2 * n / 3):
+        return "Удовлетворительные показатели"
+    return "Неудовлетворительные показатели"
 
 
 def aggregate_clubs(
     files: list[tuple[str, bytes]], capacity: int | None = None,
     season_label: str = "2025/2026",
 ) -> bytes:
-    """Собирает книгу с листом «Средние по клубам» по нескольким файлам."""
+    """Книга «Средние по клубам»: по каждому параметру — среднее/мин/макс и
+    таблица клубов со значением, местом и градацией."""
     if not files:
         raise TicketError("Не приложено ни одного файла.")
     if len(files) > MAX_CLUBS:
@@ -201,55 +214,83 @@ def aggregate_clubs(
             errors.append(f"{name}: {exc}")
     if not clubs:
         raise TicketError("Ни один файл не удалось обработать. " + "; ".join(errors))
+    n = len(clubs)
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Средние по клубам"
-    ws.column_dimensions["A"].width = 42
-    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 16
     ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["D"].width = 30
 
     ws["A1"] = f"Агрегированный отчёт по клубам — сезон {season_label}"
     ws["A1"].font = _H
-    ws["A2"] = f"Клубов в выборке: {len(clubs)}"
+    ws["A2"] = f"Клубов в выборке: {n}"
     ws["A2"].font = _REG
 
-    # Заголовок таблицы: Показатель | Среднее | Ед. | <клуб1> | <клуб2> …
-    hdr = ["Показатель", "Среднее по клубам", "Ед."] + [c[0] for c in clubs]
-    for j, t in enumerate(hdr, start=1):
-        cell = ws.cell(4, j, t)
-        cell.font = _HDR
-        cell.fill = _HDRFILL
-        cell.alignment = Alignment(wrap_text=True, vertical="center")
-    for j in range(4, 4 + len(clubs)):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(j)].width = 16
+    row = 4
+    for key, label, unit, direction, is_pct in PARAMS:
+        fmt = "0.0%" if is_pct else "#,##0"
+        pairs = [(name, m.get(key)) for name, m in clubs]
+        present = [(name, v) for name, v in pairs if isinstance(v, (int, float))]
+        vals = [v for _, v in present]
 
-    money_fmt = '#,##0'
-    pct_fmt = "0.0%"
-    row = 5
-    for key, label, unit, is_pct in METRICS:
-        ws.cell(row, 1, label).font = _REG
-        vals = [c[1].get(key) for c in clubs]
-        present = [v for v in vals if isinstance(v, (int, float))]
-        avg = (sum(present) / len(present)) if present else None
-        fmt = pct_fmt if is_pct else money_fmt
-        a = ws.cell(row, 2, round(avg, 4) if avg is not None else "—")
-        a.font = Font(name=_FONT, bold=True)
-        if avg is not None:
-            a.number_format = fmt
-        ws.cell(row, 3, unit).font = _REG
-        for j, (_, m) in enumerate(clubs, start=4):
-            v = m.get(key)
-            c = ws.cell(row, j, round(v, 4) if isinstance(v, (int, float)) else "—")
-            c.font = _REG
-            if isinstance(v, (int, float)):
-                c.number_format = fmt
+        # секция параметра
+        sc = ws.cell(row, 1, f"{label}, {unit}")
+        sc.font = _SEC
+        for col in range(1, 5):
+            ws.cell(row, col).fill = _SECFILL
         row += 1
 
+        # среднее / мин / макс по Лиге
+        if vals:
+            avg = sum(vals) / len(vals)
+            for j, (lbl, val) in enumerate((
+                ("Среднее по Лиге", avg), ("Минимум", min(vals)), ("Максимум", max(vals)),
+            )):
+                ws.cell(row + j, 1, lbl).font = _REG
+                c = ws.cell(row + j, 2, round(val, 4))
+                c.font = _HDR
+                c.number_format = fmt
+            row += 3
+        else:
+            ws.cell(row, 1, "Нет данных по параметру").font = _REG
+            row += 1
+
+        # таблица клубов: Клуб | Значение | Место | Градация
+        for j, t in enumerate(("Клуб", "Значение", "Место", "Градация"), start=1):
+            hc = ws.cell(row, j, t)
+            hc.font = _HDR
+            hc.fill = _HDRFILL
+        row += 1
+
+        # ранжирование: место по направлению (desc — больше лучше)
+        ranked = sorted(present, key=lambda kv: kv[1], reverse=(direction == "desc"))
+        rank_of = {name: i + 1 for i, (name, _) in enumerate(ranked)}
+        for name, val in pairs:
+            ws.cell(row, 1, name).font = _REG
+            if isinstance(val, (int, float)):
+                c = ws.cell(row, 2, round(val, 4))
+                c.number_format = fmt
+                c.font = _REG
+                rk = rank_of[name]
+                ws.cell(row, 3, rk).font = _REG
+                grade = _grade(rk, len(ranked))
+                gc = ws.cell(row, 4, grade)
+                gc.font = _REG
+                gc.fill = _GRADE_FILL[grade]
+            else:
+                ws.cell(row, 2, "—").font = _REG
+                ws.cell(row, 3, "—").font = _REG
+                ws.cell(row, 4, "нет данных").font = _REG
+            row += 1
+        row += 1  # пустая строка между параметрами
+
     if errors:
-        ws.cell(row + 1, 1, "Не обработаны:").font = _HDR
+        ws.cell(row, 1, "Не обработаны:").font = _HDR
         for k, e in enumerate(errors, start=1):
-            ws.cell(row + 1 + k, 1, e).font = Font(name=_FONT, size=9, color="A51C1C")
+            ws.cell(row + k, 1, e).font = Font(name=_FONT, size=9, color="A51C1C")
 
     out = BytesIO()
     wb.save(out)
