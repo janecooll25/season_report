@@ -9,6 +9,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import openpyxl
+from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -100,6 +101,53 @@ def _num_or_zero(cell: str) -> str:
     return f"IF(ISNUMBER('{AG}'!{cell}),'{AG}'!{cell},0)"
 
 
+def _prep_agent_commission(ws) -> tuple[int, int] | None:
+    """Столбец «Размер агентской комиссии, %» делаем числовым (0 вместо « - »).
+
+    Возвращает (строка первого агента, столбец комиссии) для формулы C52.
+    """
+    header = channels = None
+    for i in range(1, ws.max_row + 1):
+        v = ws.cell(i, 1).value
+        if isinstance(v, str):
+            u = v.strip().lower()
+            if u == "название агента":
+                header = i
+            elif channels is None and ("через каналы продаж" in u or u == "канал продаж"):
+                channels = i
+    if header is None:
+        return None
+
+    comm_col = 4  # D по умолчанию
+    for c in range(1, ws.max_column + 1):
+        hv = ws.cell(header, c).value
+        if isinstance(hv, str) and "комисси" in hv.lower():
+            comm_col = c
+            break
+
+    end = channels if channels else ws.max_row + 1
+    anchor = None
+    for r in range(header + 1, end):
+        cell = ws.cell(r, comm_col)
+        if isinstance(cell, MergedCell):  # часть объединённого заголовка
+            continue
+        name = ws.cell(r, 1).value
+        if not isinstance(name, MergedCell) and name not in (None, "") and anchor is None:
+            anchor = r
+        if isinstance(cell.value, str):  # текстовый плейсхолдер « - » → 0
+            cell.value = 0
+    if anchor is None:
+        for r in range(header + 1, end):
+            if not isinstance(ws.cell(r, comm_col), MergedCell):
+                anchor = r
+                break
+    if anchor is not None:
+        ac = ws.cell(anchor, comm_col)
+        if not isinstance(ac.value, (int, float)) or isinstance(ac.value, bool):
+            ac.value = 0
+    return (anchor, comm_col) if anchor else None
+
+
 def _default_capacity(data: BytesIO) -> int:
     """Оценка вместимости = макс. посещаемость за матч (если не задана явно)."""
     wb = openpyxl.load_workbook(data, data_only=True, read_only=True)
@@ -149,8 +197,10 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     dh = wb[DH]
     if AG in wb.sheetnames:
         ag_rows = _agent_rows(wb[AG])
+        commission = _prep_agent_commission(wb[AG])
     else:
         ag_rows = {}
+        commission = None
 
     rz_reg, rz_po = _section_spans(rz)
     dh_reg, dh_po = _section_spans(dh)
@@ -292,13 +342,17 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(50, "Всего по каналам", total_ch, "шт.")
     metric(51, "Доля онлайн-продаж", f'IF({total_ch}=0,"нет данных",{online}/{total_ch})', "%",
            fmt=PCT)
-    if "agent_first" in ag_rows:
-        d = f"D{ag_rows['agent_first']}"
+    if commission:
+        d = f"{get_column_letter(commission[1])}{commission[0]}"
         metric(52, "Агентская комиссия",
-               f'IF(ISNUMBER(\'{AG}\'!{d}),\'{AG}\'!{d}/100,"нет данных")', "%", fmt=PCT)
+               f'IF(ISNUMBER(\'{AG}\'!{d}),\'{AG}\'!{d}/100,'
+               f'IFERROR(VALUE(\'{AG}\'!{d})/100,0))', "%",
+               "по умолчанию 0; заполняется в таблице агентов", fmt=PCT)
     else:
         ws.cell(52, 2, "Агентская комиссия").font = _REG
-        ws.cell(52, 3, "нет данных").font = _REG
+        c = ws.cell(52, 3, 0)
+        c.font = _REG
+        c.number_format = PCT
 
     # ── 4. Диагностика данных (формулы-флаги по метрикам выше) ────────────
     section(54, "4. Диагностика данных")

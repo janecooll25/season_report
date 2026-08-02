@@ -35,6 +35,9 @@ def _make_raw() -> bytes:
     dh.append([3, None, 300000, 220000, 60000, 3000, 15000])  # row7
 
     ag = wb.create_sheet(AG)
+    ag["A2"] = "Название агента"
+    ag["D2"] = "Размер агентской комиссии, %"
+    ag["A4"] = " - "; ag["D4"] = " - "   # текстовый плейсхолдер комиссии
     ag["A9"] = "Канал продаж"
     ag["A10"] = "Онлайн"; ag["B10"] = 300
     ag["A11"] = "Оффлайн"; ag["B11"] = 100
@@ -90,6 +93,19 @@ def test_protocol_column_and_deviation_metric():
     # относительное расхождение, %
     assert calc["B26"].value == "Расхождение факта с заявленным, %"
     assert "IFERROR" in calc["C26"].value and calc["C26"].value.endswith(",0)")
+
+
+def test_agent_commission_becomes_numeric():
+    out = build_calculations(_make_raw(), capacity=200, season_label="2025/2026")
+    wb = openpyxl.load_workbook(BytesIO(out))
+    ag = wb[AG]
+    # текстовый плейсхолдер « - » в столбце комиссии заменён на число 0
+    assert ag.cell(4, 4).value == 0
+    calc = wb["Расчеты"]
+    assert calc["B52"].value == "Агентская комиссия"
+    # формула ссылается на ячейку комиссии агента (D4) с числовым запасом
+    assert "'Агенты и онлайн продажи'!D4" in calc["C52"].value
+    assert "VALUE(" in calc["C52"].value
 
 
 def test_missing_required_sheet_raises():
