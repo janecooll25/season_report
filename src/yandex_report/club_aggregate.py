@@ -103,8 +103,13 @@ PARAMS: list[tuple[str, str, str, str, bool]] = [
 ]
 
 
-def compute_club_metrics(input_bytes: bytes, capacity: int | None = None) -> dict[str, float | None]:
-    """Числовые метрики одного клуба (без формул)."""
+def compute_club_metrics(input_bytes: bytes, capacity: int | None = None,
+                         to_rub: float = 1.0) -> dict[str, float | None]:
+    """Числовые метрики одного клуба (без формул).
+
+    to_rub — множитель для пересчёта денежных метрик в рубли РФ (для клубов,
+    чьи суммы в иностранной валюте, напр. BYN/KZT). По умолчанию 1.0 (RUB).
+    """
     wb = openpyxl.load_workbook(BytesIO(input_bytes))
     for name in (RZ, DH):
         if name not in wb.sheetnames:
@@ -187,10 +192,16 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None) -> dic
         if rng:
             col_letter, first, last = rng
             col = openpyxl.utils.column_index_from_string(col_letter)
-            vals = [_num(ag, r, col) for r in range(first, last + 1)
-                    if isinstance(ag.cell(r, col).value, (int, float))
-                    and not isinstance(ag.cell(r, col).value, bool)]
+            # комиссия — процент; отбрасываем неправдоподобные значения
+            # (пустые/« - » → 0, а также абсолютные суммы, ошибочно внесённые
+            # вместо процента).
+            vals = [v for v in (_num(ag, r, col) for r in range(first, last + 1))
+                    if 0 < v <= 100]
             commission = (sum(vals) / len(vals) / 100) if vals else None
+
+    # Денежные метрики → рубли РФ (для клубов с суммами в иностранной валюте).
+    def _rub(x):
+        return x * to_rub if isinstance(x, (int, float)) else x
 
     return {
         "att_season": att_season,
@@ -202,12 +213,12 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None) -> dic
         "free_share": free_share,
         "abon_paid": abon_paid,
         "fill_reg": fill_reg,
-        "income_total": income_total,
-        "income_paid": income_paid,
-        "income_abon": income_abon,
-        "price_season": price_season,
-        "price_reg": price_reg,
-        "abon_price": abon_price,
+        "income_total": _rub(income_total),
+        "income_paid": _rub(income_paid),
+        "income_abon": _rub(income_abon),
+        "price_season": _rub(price_season),
+        "price_reg": _rub(price_reg),
+        "abon_price": _rub(abon_price),
         "online_share": online_share,
         "commission": commission,
         "deviation": deviation,

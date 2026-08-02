@@ -77,6 +77,17 @@ def test_paid_column_as_formula_is_evaluated():
     assert m["att_season"] == 442
 
 
+def test_to_rub_scales_money_metrics_only():
+    """to_rub пересчитывает деньги в рубли, но не трогает доли/проценты."""
+    base = compute_club_metrics(_make_raw(), capacity=200)
+    conv = compute_club_metrics(_make_raw(), capacity=200, to_rub=27.0)
+    assert conv["income_total"] == pytest.approx(base["income_total"] * 27.0)
+    assert conv["price_reg"] == pytest.approx(base["price_reg"] * 27.0)
+    # доли не денежные — без изменений
+    assert conv["free_share"] == base["free_share"]
+    assert conv["online_share"] == base["online_share"]
+
+
 def test_too_many_files_raises():
     files = [(f"c{i}.xlsx", _make_raw()) for i in range(MAX_CLUBS + 1)]
     with pytest.raises(TicketError):

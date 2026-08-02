@@ -176,12 +176,20 @@ def _agent_commission_range(ws) -> tuple[str, int, int] | None:
     if header is None:
         return None
 
-    comm_col = 4  # D по умолчанию
+    # Ищем именно столбец «Размер агентской комиссии, %», а не столбец дохода,
+    # в заголовке которого тоже может встречаться слово «комиссия»
+    # (напр. «Доход клуба … (в т.ч. агентская комиссия)»).
+    comm_col = None
     for c in range(1, ws.max_column + 1):
         hv = ws.cell(header, c).value
-        if isinstance(hv, str) and "комисси" in hv.lower():
+        if not isinstance(hv, str):
+            continue
+        h = hv.lower()
+        if "комисси" in h and "доход" not in h and ("размер" in h or "%" in h):
             comm_col = c
             break
+    if comm_col is None:
+        comm_col = 4  # D по умолчанию
 
     end = channels if channels else ws.max_row + 1
     # Первая строка данных — после объединённого заголовка.
