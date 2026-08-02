@@ -61,6 +61,25 @@ def _coerce_numeric_text(ws) -> None:
                     cell.value = num
 
 
+def _is_data_row(row) -> bool:
+    """Строка матча: есть № игры в гр. A ЛИБО числовые данные в гр. C+.
+
+    В части выгрузок матчи плей-офф идут без порядкового номера (гр. A пустая),
+    но с датой и числами реализации — такие строки тоже нужно учитывать.
+    Текст в гр. A (маркеры секций, сноски «*…», заголовки) строкой данных не
+    считается.
+    """
+    a = row[0] if row else None
+    if _is_int(a):
+        return True
+    if isinstance(a, str) and a.strip():
+        return False
+    for v in row[2:]:  # № игры нет — матч определяем по числам в гр. C и далее
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return True
+    return False
+
+
 def _section_spans(ws) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
     """Диапазоны строк данных: (регулярка, плей-офф) по номерам строк листа."""
     reg_marker = po_marker = None
@@ -71,9 +90,11 @@ def _section_spans(ws) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
             u = a.strip().upper()
             if "РЕГУЛЯРН" in u:
                 reg_marker = i
-            elif "ПЛЕЙ" in u and "ОФФ" in u:
+                continue
+            if "ПЛЕЙ" in u and "ОФФ" in u:
                 po_marker = i
-        elif _is_int(a):
+                continue
+        if _is_data_row(row):
             nums.append(i)
     if reg_marker is None:
         raise TicketError(f"На листе «{ws.title}» не найдена секция «Регулярный чемпионат».")
@@ -105,9 +126,11 @@ def _maxr(sheet: str, col: str, span) -> str:
 
 
 def _count(sheet: str, span) -> str:
+    # Считаем матчи по столбцу K («всего») — он числовой в каждой строке матча,
+    # тогда как № игры (гр. A) у плей-офф в части выгрузок пустой.
     if not span:
         return "0"
-    return f"COUNT('{sheet}'!A{span[0]}:A{span[1]})"
+    return f"COUNT('{sheet}'!K{span[0]}:K{span[1]})"
 
 
 def _agent_rows(ws) -> dict[str, int]:

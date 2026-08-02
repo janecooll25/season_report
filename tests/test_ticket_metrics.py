@@ -56,6 +56,24 @@ def test_section_spans_detects_regular_and_playoff():
     assert po == (8, 8)
 
 
+def test_section_spans_detects_playoff_without_game_numbers():
+    """Плей-офф без порядкового № игры (гр. A пустая, но есть дата и числа)."""
+    wb = openpyxl.load_workbook(BytesIO(_make_raw()))
+    rz = wb[RZ]
+    rz["A8"] = None  # убираем № игры у единственного матча плей-офф
+    buf = BytesIO(); wb.save(buf)
+
+    reg, po = _section_spans(openpyxl.load_workbook(buf)[RZ])
+    assert reg == (5, 6)
+    assert po == (8, 8)  # строка плей-офф всё равно распознана
+
+    out = build_calculations(buf.getvalue(), capacity=200)
+    ws = openpyxl.load_workbook(BytesIO(out))["Расчеты"]
+    # плей-офф попал в диапазоны формул, а не свёлся к «+0»
+    assert ws["C7"].value == "=SUM('Реализованные билеты'!K8:K8)"
+    assert ws["C22"].value == "=COUNT('Реализованные билеты'!K8:K8)"
+
+
 def test_build_adds_calc_sheet_and_preserves_originals():
     out = build_calculations(_make_raw(), capacity=200, season_label="2025/2026")
     wb = openpyxl.load_workbook(BytesIO(out))
@@ -68,8 +86,8 @@ def test_calc_formulas_reference_correct_ranges():
     ws = openpyxl.load_workbook(BytesIO(out))["Расчеты"]
     # Посещаемость за сезон = регулярка(K5:K6) + плей-офф(K8:K8)
     assert ws["C5"].value == "=(SUM('Реализованные билеты'!K5:K6)+SUM('Реализованные билеты'!K8:K8))"
-    # Матчей регулярного чемпионата
-    assert ws["C21"].value == "=COUNT('Реализованные билеты'!A5:A6)"
+    # Матчей регулярного чемпионата (считаем по гр. K — «всего»)
+    assert ws["C21"].value == "=COUNT('Реализованные билеты'!K5:K6)"
     # Вместимость арены — параметр в H2
     assert ws["H2"].value == 200
 
