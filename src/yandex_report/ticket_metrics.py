@@ -135,10 +135,11 @@ def _num_or_zero(cell: str) -> str:
     return f"IF(ISNUMBER('{AG}'!{cell}),'{AG}'!{cell},0)"
 
 
-def _prep_agent_commission(ws) -> tuple[int, int] | None:
-    """Столбец «Размер агентской комиссии, %» делаем числовым (0 вместо « - »).
+def _agent_commission_range(ws) -> tuple[str, int, int] | None:
+    """Диапазон столбца «Размер агентской комиссии, %» по строкам агентов.
 
-    Возвращает (строка первого агента, столбец комиссии) для формулы C52.
+    Возвращает (буква столбца, первая строка, последняя строка) для средней
+    комиссии по агентам. AVERAGE сам игнорирует текст (« - ») и пустые ячейки.
     """
     header = channels = None
     for i in range(1, ws.max_row + 1):
@@ -160,26 +161,16 @@ def _prep_agent_commission(ws) -> tuple[int, int] | None:
             break
 
     end = channels if channels else ws.max_row + 1
-    anchor = None
+    # Первая строка данных — после объединённого заголовка.
+    first = None
     for r in range(header + 1, end):
-        cell = ws.cell(r, comm_col)
-        if isinstance(cell, MergedCell):  # часть объединённого заголовка
-            continue
-        name = ws.cell(r, 1).value
-        if not isinstance(name, MergedCell) and name not in (None, "") and anchor is None:
-            anchor = r
-        if isinstance(cell.value, str):  # текстовый плейсхолдер « - » → 0
-            cell.value = 0
-    if anchor is None:
-        for r in range(header + 1, end):
-            if not isinstance(ws.cell(r, comm_col), MergedCell):
-                anchor = r
-                break
-    if anchor is not None:
-        ac = ws.cell(anchor, comm_col)
-        if not isinstance(ac.value, (int, float)) or isinstance(ac.value, bool):
-            ac.value = 0
-    return (anchor, comm_col) if anchor else None
+        if not isinstance(ws.cell(r, comm_col), MergedCell):
+            first = r
+            break
+    if first is None:
+        return None
+    last = max(first, end - 1)
+    return (get_column_letter(comm_col), first, last)
 
 
 def _default_capacity(data: BytesIO) -> int:
@@ -231,7 +222,7 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     dh = wb[DH]
     if AG in wb.sheetnames:
         ag_rows = _agent_rows(wb[AG])
-        commission = _prep_agent_commission(wb[AG])
+        commission = _agent_commission_range(wb[AG])
     else:
         ag_rows = {}
         commission = None
@@ -377,13 +368,13 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     metric(51, "Доля онлайн-продаж", f'IF({total_ch}=0,"нет данных",{online}/{total_ch})', "%",
            fmt=PCT)
     if commission:
-        d = f"{get_column_letter(commission[1])}{commission[0]}"
-        metric(52, "Агентская комиссия",
-               f'IF(ISNUMBER(\'{AG}\'!{d}),\'{AG}\'!{d}/100,'
-               f'IFERROR(VALUE(\'{AG}\'!{d})/100,0))', "%",
-               "по умолчанию 0; заполняется в таблице агентов", fmt=PCT)
+        col, first, last = commission
+        rng = f"'{AG}'!{col}{first}:{col}{last}"
+        metric(52, "Агентская комиссия (средняя по агентам)",
+               f"IFERROR(AVERAGE({rng})/100,0)", "%",
+               "среднее по столбцу комиссии; пустые/« - » не учитываются", fmt=PCT)
     else:
-        ws.cell(52, 2, "Агентская комиссия").font = _REG
+        ws.cell(52, 2, "Агентская комиссия (средняя по агентам)").font = _REG
         c = ws.cell(52, 3, 0)
         c.font = _REG
         c.number_format = PCT

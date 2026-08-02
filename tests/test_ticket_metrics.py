@@ -95,17 +95,14 @@ def test_protocol_column_and_deviation_metric():
     assert "IFERROR" in calc["C26"].value and calc["C26"].value.endswith(",0)")
 
 
-def test_agent_commission_becomes_numeric():
+def test_agent_commission_is_average():
     out = build_calculations(_make_raw(), capacity=200, season_label="2025/2026")
-    wb = openpyxl.load_workbook(BytesIO(out))
-    ag = wb[AG]
-    # текстовый плейсхолдер « - » в столбце комиссии заменён на число 0
-    assert ag.cell(4, 4).value == 0
-    calc = wb["Расчеты"]
-    assert calc["B52"].value == "Агентская комиссия"
-    # формула ссылается на ячейку комиссии агента (D4) с числовым запасом
-    assert "'Агенты и онлайн продажи'!D4" in calc["C52"].value
-    assert "VALUE(" in calc["C52"].value
+    calc = openpyxl.load_workbook(BytesIO(out))["Расчеты"]
+    assert calc["B52"].value == "Агентская комиссия (средняя по агентам)"
+    # средняя по столбцу комиссии агентов, /100, с запасом на пустую таблицу
+    assert calc["C52"].value == (
+        "=IFERROR(AVERAGE('Агенты и онлайн продажи'!D3:D8)/100,0)"
+    )
 
 
 def test_numeric_text_is_coerced_to_numbers():
