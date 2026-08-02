@@ -45,8 +45,10 @@ def _both(fn, ws, col, reg, po) -> float:
 # direction: "desc" — выше = лучше (место 1 — максимум); "asc" — ниже = лучше.
 PARAMS: list[tuple[str, str, str, str, bool]] = [
     ("price_reg", "Средняя цена билета (регулярный чемпионат)", "руб.", "desc", False),
+    ("income_total", "Общая выручка (за сезон)", "руб.", "desc", False),
     ("online_share", "Доля продаж билетов онлайн", "%", "desc", True),
     ("free_share", "Доля бесплатных билетов", "%", "asc", True),
+    ("commission", "Агентская комиссия (средняя)", "%", "asc", True),
     ("deviation", "Фактическое отклонение посещаемости", "%", "asc", True),
 ]
 
