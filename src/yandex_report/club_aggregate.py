@@ -194,6 +194,51 @@ def _grade(rank: int, n: int) -> str:
     return "Неудовлетворительные показатели"
 
 
+def _compute_all(
+    files: list[tuple[str, bytes]], capacity: int | None
+) -> tuple[list[tuple[str, dict]], list[str]]:
+    if not files:
+        raise TicketError("Не приложено ни одного файла.")
+    if len(files) > MAX_CLUBS:
+        raise TicketError(f"Слишком много файлов: {len(files)} (максимум {MAX_CLUBS}).")
+    clubs: list[tuple[str, dict]] = []
+    errors: list[str] = []
+    for name, data in files:
+        try:
+            clubs.append((_club_name(name), compute_club_metrics(data, capacity)))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{name}: {exc}")
+    if not clubs:
+        raise TicketError("Ни один файл не удалось обработать. " + "; ".join(errors))
+    return clubs, errors
+
+
+def _rank_param(clubs, key: str, direction: str):
+    """Возвращает ((среднее, мин, макс), [(место, клуб, значение, градация), …]).
+
+    Клубы без значения идут в конце с местом None.
+    """
+    pairs = [(name, m.get(key)) for name, m in clubs]
+    present = [(name, v) for name, v in pairs if isinstance(v, (int, float))]
+    vals = [v for _, v in present]
+    stats = (sum(vals) / len(vals), min(vals), max(vals)) if vals else (None, None, None)
+    ranked = sorted(present, key=lambda kv: kv[1], reverse=(direction == "desc"))
+    rows = [(i, name, v, _grade(i, len(ranked)))
+            for i, (name, v) in enumerate(ranked, start=1)]
+    rows += [(None, name, None, "нет данных")
+             for name, v in pairs if not isinstance(v, (int, float))]
+    return stats, rows
+
+
+def _fmt_val(v, unit: str, is_pct: bool) -> str:
+    if not isinstance(v, (int, float)):
+        return "—"
+    if is_pct:
+        return f"{v * 100:.1f}%"
+    s = f"{v:,.0f}".replace(",", " ")
+    return f"{s} ₽" if unit == "руб." else s
+
+
 def aggregate_clubs(
     files: list[tuple[str, bytes]], capacity: int | None = None,
     season_label: str = "2025/2026",
@@ -205,15 +250,7 @@ def aggregate_clubs(
     if len(files) > MAX_CLUBS:
         raise TicketError(f"Слишком много файлов: {len(files)} (максимум {MAX_CLUBS}).")
 
-    clubs: list[tuple[str, dict]] = []
-    errors: list[str] = []
-    for name, data in files:
-        try:
-            clubs.append((_club_name(name), compute_club_metrics(data, capacity)))
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{name}: {exc}")
-    if not clubs:
-        raise TicketError("Ни один файл не удалось обработать. " + "; ".join(errors))
+    clubs, errors = _compute_all(files, capacity)
     n = len(clubs)
 
     wb = openpyxl.Workbook()
@@ -294,4 +331,62 @@ def aggregate_clubs(
 
     out = BytesIO()
     wb.save(out)
+    return out.getvalue()
+
+
+def build_aggregate_docx(
+    files: list[tuple[str, bytes]], capacity: int | None = None,
+    season_label: str = "2025/2026",
+) -> bytes:
+    """Общий документ (docx): по каждому из 4 параметров — среднее/мин/макс по
+    Лиге и таблица клубов, ранжированных по местам (1..N) с градацией."""
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    clubs, errors = _compute_all(files, capacity)
+
+    doc = Document()
+    title = doc.add_heading(
+        f"Сводный анализ билетной программы клубов КХЛ — сезон {season_label}", level=0
+    )
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Клубов в выборке: {len(clubs)}")
+
+    for key, label, unit, direction, is_pct in PARAMS:
+        doc.add_heading(label, level=1)
+        (avg, mn, mx), rows = _rank_param(clubs, key, direction)
+        if avg is not None:
+            better = "выше" if direction == "desc" else "ниже"
+            doc.add_paragraph(
+                f"Среднее по Лиге: {_fmt_val(avg, unit, is_pct)}; "
+                f"минимум: {_fmt_val(mn, unit, is_pct)}; "
+                f"максимум: {_fmt_val(mx, unit, is_pct)}. "
+                f"Место 1 — лучший показатель ({better} значение)."
+            )
+        else:
+            doc.add_paragraph("Нет данных по параметру.")
+
+        table = doc.add_table(rows=1, cols=4)
+        table.style = "Light Grid Accent 1"
+        for i, t in enumerate(("Место", "Клуб", "Значение", "Градация")):
+            cell = table.rows[0].cells[i]
+            cell.text = t
+            for p in cell.paragraphs:
+                for run in p.runs:
+                    run.bold = True
+        for place, name, v, grade in rows:
+            c = table.add_row().cells
+            c[0].text = str(place) if place else "—"
+            c[1].text = name
+            c[2].text = _fmt_val(v, unit, is_pct)
+            c[3].text = grade
+
+    if errors:
+        doc.add_heading("Не обработаны", level=2)
+        for e in errors:
+            doc.add_paragraph(e, style="List Bullet")
+
+    from io import BytesIO as _BytesIO
+    out = _BytesIO()
+    doc.save(out)
     return out.getvalue()

@@ -7,7 +7,7 @@ import pytest
 
 from test_ticket_metrics import _make_raw
 from yandex_report.club_aggregate import (
-    MAX_CLUBS, aggregate_clubs, compute_club_metrics,
+    MAX_CLUBS, aggregate_clubs, build_aggregate_docx, compute_club_metrics,
 )
 from yandex_report.ticket_metrics import TicketError
 
@@ -38,6 +38,25 @@ def test_aggregate_has_four_params_with_grades():
     assert "HC A" in col_a and "HC B" in col_a
     grades = [ws.cell(r, 4).value for r in range(1, ws.max_row + 1)]
     assert any("показатели" in str(g) for g in grades)
+
+
+def test_aggregate_docx_lists_params_and_places():
+    from io import BytesIO as _B
+
+    from docx import Document
+
+    files = [("HC_A.xlsx", _make_raw()), ("HC_B.xlsx", _make_raw())]
+    out = build_aggregate_docx(files, capacity=200, season_label="2025/2026")
+    doc = Document(_B(out))
+    headings = [p.text for p in doc.paragraphs if p.style.name.startswith("Heading")]
+    assert any("Средняя цена билета" in h for h in headings)
+    assert any("Доля продаж билетов онлайн" in h for h in headings)
+    # таблицы с колонкой «Место» и клубами, ранжированными по местам
+    assert doc.tables
+    hdr = [c.text for c in doc.tables[0].rows[0].cells]
+    assert hdr == ["Место", "Клуб", "Значение", "Градация"]
+    places = [doc.tables[0].rows[i].cells[0].text for i in range(1, 3)]
+    assert places == ["1", "2"]
 
 
 def test_too_many_files_raises():

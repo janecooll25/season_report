@@ -54,6 +54,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="XLSX",
         help="Агрегированный отчёт по клубам (несколько xlsx или каталог)",
     )
+    p.add_argument(
+        "--aggregate-format",
+        choices=["docx", "xlsx"],
+        default="docx",
+        help="Формат агрегата: docx (общий документ, по умолчанию) или xlsx",
+    )
     return p.parse_args(argv)
 
 
@@ -97,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- Режим агрегата по клубам ---
     if args.aggregate:
-        from .club_aggregate import aggregate_clubs
+        from .club_aggregate import aggregate_clubs, build_aggregate_docx
         from .ticket_metrics import TicketError
 
         paths: list[Path] = []
@@ -105,13 +111,18 @@ def main(argv: list[str] | None = None) -> int:
             p = Path(item)
             paths.extend(sorted(p.glob("*.xlsx")) if p.is_dir() else [p])
         files = [(p.name, p.read_bytes()) for p in paths]
+        season = args.season or "2025/2026"
         try:
-            data = aggregate_clubs(files, capacity=args.capacity,
-                                   season_label=args.season or "2025/2026")
+            if args.aggregate_format == "xlsx":
+                data = aggregate_clubs(files, capacity=args.capacity, season_label=season)
+                ext = "xlsx"
+            else:
+                data = build_aggregate_docx(files, capacity=args.capacity, season_label=season)
+                ext = "docx"
         except (TicketError, OSError) as exc:
             print(f"Ошибка: {exc}", file=sys.stderr)
             return 1
-        output_path = Path(args.output) if args.output else Path("output/clubs_aggregate.xlsx")
+        output_path = Path(args.output) if args.output else Path(f"output/clubs_aggregate.{ext}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(data)
         print(f"Агрегированный отчёт сохранён: {output_path}")

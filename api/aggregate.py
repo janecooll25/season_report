@@ -14,10 +14,13 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from yandex_report.club_aggregate import aggregate_clubs  # noqa: E402
+from yandex_report.club_aggregate import (  # noqa: E402
+    aggregate_clubs, build_aggregate_docx,
+)
 from yandex_report.ticket_metrics import TicketError  # noqa: E402
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 class handler(BaseHTTPRequestHandler):
@@ -48,9 +51,15 @@ class handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             capacity = None
         season = (payload.get("season") or "2025/2026").strip() or "2025/2026"
+        fmt = (payload.get("format") or "docx").strip().lower()
 
         try:
-            data = aggregate_clubs(files, capacity=capacity, season_label=season)
+            if fmt == "xlsx":
+                data = aggregate_clubs(files, capacity=capacity, season_label=season)
+                filename, mime = "clubs_aggregate.xlsx", XLSX_MIME
+            else:
+                data = build_aggregate_docx(files, capacity=capacity, season_label=season)
+                filename, mime = "clubs_aggregate.docx", DOCX_MIME
         except TicketError as exc:
             self._json(400, {"error": str(exc)})
             return
@@ -58,9 +67,8 @@ class handler(BaseHTTPRequestHandler):
             self._json(500, {"error": f"{exc.__class__.__name__}: {exc}"})
             return
 
-        filename = "clubs_aggregate.xlsx"
         self.send_response(200)
-        self.send_header("Content-Type", XLSX_MIME)
+        self.send_header("Content-Type", mime)
         self.send_header(
             "Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}"
         )

@@ -36,6 +36,10 @@
       border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px;
     }
     input[type=file] { padding: 8px; }
+    #agg-format {
+      width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px;
+    }
     .row { display: flex; gap: 12px; }
     .row > div { flex: 1; }
     .tabs { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -124,8 +128,13 @@
       <div id="pane-agg" class="hidden">
         <label for="xlsx-agg">Файлы клубов (xlsx, до 22)</label>
         <input type="file" id="xlsx-agg" accept=".xlsx" multiple />
-        <p class="hint">По одному файлу на клуб. Считается отчёт со средними
-          показателями по клубам (отдельная книга «Средние по клубам»).</p>
+        <p class="hint">По одному файлу на клуб. Общий отчёт: 4 параметра, по
+          каждому — среднее/мин/макс по Лиге и места клубов (1..22) с градацией.</p>
+        <label for="agg-format">Формат</label>
+        <select id="agg-format">
+          <option value="docx">Документ Word (.docx)</option>
+          <option value="xlsx">Таблица Excel (.xlsx)</option>
+        </select>
       </div>
 
       <label for="season">Метка сезона</label>
@@ -329,7 +338,8 @@
           const files = await Promise.all([...input.files].map(async (f) => ({
             name: f.name, content_b64: await readBase64(f),
           })));
-          const bodyStr = JSON.stringify({ files, season });
+          const format = document.getElementById('agg-format').value;
+          const bodyStr = JSON.stringify({ files, season, format });
           const gz = await gzipBody(bodyStr);
           const headers = { 'Content-Type': 'application/json' };
           let body = bodyStr;
