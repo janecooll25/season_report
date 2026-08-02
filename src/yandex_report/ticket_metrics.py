@@ -217,7 +217,8 @@ def _prep_protocol_column(rz, reg, po) -> None:
                 rz.cell(r, PROTOCOL_COL_IDX).value = 0
 
 
-def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
+def _build_calc_sheet(wb, season_label: str, capacity_value: int,
+                      byn_to_rub: float | None = None) -> None:
     rz = wb[RZ]
     dh = wb[DH]
     if AG in wb.sheetnames:
@@ -251,6 +252,22 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
     ws["H2"].font = _INPUT
     ws["H2"].number_format = NUM
     CAP = "$H$2"
+
+    # H3 — курс BYN→RUB (если суммы в белорусских рублях). Редактируемый.
+    if byn_to_rub:
+        ws["G3"] = "Курс BYN→RUB (на 01.07.2025):"
+        ws["G3"].font = _HDR
+        ws["H3"] = byn_to_rub
+        ws["H3"].font = _INPUT
+        ws["H3"].number_format = "0.0000"
+        RATE: str | None = "$H$3"
+        money_unit = "руб. РФ"
+    else:
+        RATE = None
+        money_unit = "руб."
+
+    def rub(formula: str) -> str:
+        return f"({formula})*{RATE}" if RATE else formula
 
     ws["B1"] = f"Расчёт метрик билетной программы — сезон {season_label}"
     ws["B1"].font = _H
@@ -334,23 +351,29 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
            "средняя посещаемость / вместимость", fmt=PCT)
 
     # ── 2. Доход ─────────────────────────────────────────────────────────
-    section(32, "2. Доход от реализации билетов, руб.")
+    conv = " (пересчёт по курсу H3)" if RATE else ""
+    section(32, f"2. Доход от реализации билетов, {money_unit}{conv}")
     header(33)
-    metric(34, "Доход — всего за сезон", _both(DH, "C", dh_reg, dh_po), "руб.", "гр. C", fmt=RUB)
-    metric(35, "   регулярный чемпионат", _sum(DH, "C", dh_reg), "руб.", fmt=RUB)
-    metric(36, "   плей-офф", _sum(DH, "C", dh_po), "руб.", fmt=RUB)
-    metric(37, "Доход от платных билетов", _both(DH, "D", dh_reg, dh_po), "руб.", "гр. D", fmt=RUB)
-    metric(38, "Доход от абонементов/пакетов", _both(DH, "E", dh_reg, dh_po), "руб.", "гр. E", fmt=RUB)
+    metric(34, "Доход — всего за сезон", rub(_both(DH, "C", dh_reg, dh_po)), money_unit,
+           "гр. C" + conv, fmt=RUB)
+    metric(35, "   регулярный чемпионат", rub(_sum(DH, "C", dh_reg)), money_unit, fmt=RUB)
+    metric(36, "   плей-офф", rub(_sum(DH, "C", dh_po)), money_unit, fmt=RUB)
+    metric(37, "Доход от платных билетов", rub(_both(DH, "D", dh_reg, dh_po)), money_unit,
+           "гр. D" + conv, fmt=RUB)
+    metric(38, "Доход от абонементов/пакетов", rub(_both(DH, "E", dh_reg, dh_po)), money_unit,
+           "гр. E" + conv, fmt=RUB)
     metric(39, "Стоимость абонемента (за сезон)",
-           f"IFERROR({_both(DH, 'E', dh_reg, dh_po)}/MAX({_maxr(RZ, 'E', rz_reg)},{_maxr(RZ, 'E', rz_po)}),0)",
-           "руб.", "доход абон. / число владельцев", fmt=RUB)
-    metric(40, "Доход от бизнес-клубов/ресторанов", _both(DH, "F", dh_reg, dh_po), "руб.", "гр. F", fmt=RUB)
-    metric(41, "Доход от лож", _both(DH, "G", dh_reg, dh_po), "руб.", "гр. G", fmt=RUB)
+           rub(f"IFERROR({_both(DH, 'E', dh_reg, dh_po)}/MAX({_maxr(RZ, 'E', rz_reg)},{_maxr(RZ, 'E', rz_po)}),0)"),
+           money_unit, "доход абон. / число владельцев" + conv, fmt=RUB)
+    metric(40, "Доход от бизнес-клубов/ресторанов", rub(_both(DH, "F", dh_reg, dh_po)), money_unit,
+           "гр. F" + conv, fmt=RUB)
+    metric(41, "Доход от лож", rub(_both(DH, "G", dh_reg, dh_po)), money_unit, "гр. G" + conv, fmt=RUB)
     metric(43, "Средняя цена платного билета (регулярка)",
-           f"IFERROR({_sum(DH, 'D', dh_reg)}/{_sum(RZ, 'C', rz_reg)},0)", "руб.",
-           "доход платн. / платные билеты", fmt=RUB)
+           rub(f"IFERROR({_sum(DH, 'D', dh_reg)}/{_sum(RZ, 'C', rz_reg)},0)"), money_unit,
+           "доход платн. / платные билеты" + conv, fmt=RUB)
     metric(44, "Средняя цена платного билета (сезон)",
-           f"IFERROR({_both(DH, 'D', dh_reg, dh_po)}/{_both(RZ, 'C', rz_reg, rz_po)},0)", "руб.", fmt=RUB)
+           rub(f"IFERROR({_both(DH, 'D', dh_reg, dh_po)}/{_both(RZ, 'C', rz_reg, rz_po)},0)"),
+           money_unit, conv.strip(), fmt=RUB)
 
     # ── 3. Каналы продаж ─────────────────────────────────────────────────
     section(46, "3. Каналы продаж")
@@ -416,9 +439,14 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int) -> None:
 
 
 def build_calculations(
-    input_bytes: bytes, capacity: int | None = None, season_label: str = "2025/2026"
+    input_bytes: bytes, capacity: int | None = None, season_label: str = "2025/2026",
+    byn_to_rub: float | None = None,
 ) -> bytes:
-    """Из xlsx-байтов возвращает xlsx-байты с добавленным листом «Расчеты»."""
+    """Из xlsx-байтов возвращает xlsx-байты с добавленным листом «Расчеты».
+
+    byn_to_rub — курс белорусского рубля к RUB; если задан, денежные метрики
+    считаются в рублях РФ (× курс, редактируемый в ячейке H3).
+    """
     try:
         wb = openpyxl.load_workbook(BytesIO(input_bytes))
     except Exception as exc:  # noqa: BLE001
@@ -434,7 +462,7 @@ def build_calculations(
             _coerce_numeric_text(wb[name])
 
     cap = capacity or _default_capacity(BytesIO(input_bytes))
-    _build_calc_sheet(wb, season_label, cap)
+    _build_calc_sheet(wb, season_label, cap, byn_to_rub=byn_to_rub)
 
     # Принудительный полный пересчёт формул при открытии (Excel/Sheets),
     # т.к. openpyxl не сохраняет кэш значений формул.

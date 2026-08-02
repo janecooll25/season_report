@@ -122,6 +122,16 @@ def test_numeric_text_is_coerced_to_numbers():
     assert isinstance(r["A5"].value, int)
 
 
+def test_currency_conversion_adds_rate_cell_and_multiplies():
+    out = build_calculations(_make_raw(), capacity=200, byn_to_rub=27.5)
+    ws = openpyxl.load_workbook(BytesIO(out))["Расчеты"]
+    assert ws["H3"].value == 27.5
+    assert "BYN" in str(ws["G3"].value)
+    # денежные метрики умножаются на курс из H3
+    assert ws["C34"].value.endswith("*$H$3")
+    assert "руб. РФ" in ws["B32"].value
+
+
 def test_missing_required_sheet_raises():
     wb = openpyxl.Workbook()
     buf = BytesIO(); wb.save(buf)
