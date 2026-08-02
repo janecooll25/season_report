@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
 import openpyxl
@@ -25,6 +26,39 @@ class TicketError(RuntimeError):
 
 def _is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+_NUMISH = re.compile(r"^-?[\d\s .,]*\d[\d\s .,]*$")
+
+
+def _to_number(s: str):
+    """Число из текста ('1 234,5', '8 965', '12%') → float/int, иначе None."""
+    raw = s.strip().replace("%", "").strip()
+    if not _NUMISH.match(raw):
+        return None
+    t = raw.replace(" ", "").replace(" ", "")
+    if t.count(",") == 1 and t.count(".") == 0:  # запятая-десятичная
+        t = t.replace(",", ".")
+    else:  # запятые/пробелы — разделители тысяч
+        t = t.replace(",", "")
+    try:
+        f = float(t)
+    except ValueError:
+        return None
+    return int(f) if f.is_integer() else f
+
+
+def _coerce_numeric_text(ws) -> None:
+    """Приводит числа, записанные текстом, к настоящим числам (иначе SUM = 0)."""
+    for row in ws.iter_rows():
+        for cell in row:
+            if isinstance(cell, MergedCell):
+                continue
+            v = cell.value
+            if isinstance(v, str):
+                num = _to_number(v)
+                if num is not None:
+                    cell.value = num
 
 
 def _section_spans(ws) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
@@ -403,8 +437,20 @@ def build_calculations(
         if name not in wb.sheetnames:
             raise TicketError(f"В файле нет обязательного листа «{name}».")
 
+    # Числа, записанные текстом, → настоящие числа (иначе SUM даёт 0).
+    for name in (RZ, DH, AG):
+        if name in wb.sheetnames:
+            _coerce_numeric_text(wb[name])
+
     cap = capacity or _default_capacity(BytesIO(input_bytes))
     _build_calc_sheet(wb, season_label, cap)
+
+    # Принудительный полный пересчёт формул при открытии (Excel/Sheets),
+    # т.к. openpyxl не сохраняет кэш значений формул.
+    try:
+        wb.calculation.fullCalcOnLoad = True
+    except Exception:  # noqa: BLE001
+        pass
 
     out = BytesIO()
     wb.save(out)

@@ -108,6 +108,23 @@ def test_agent_commission_becomes_numeric():
     assert "VALUE(" in calc["C52"].value
 
 
+def test_numeric_text_is_coerced_to_numbers():
+    """Числа, записанные текстом, должны стать настоящими числами (иначе SUM=0)."""
+    wb = openpyxl.load_workbook(BytesIO(_make_raw()))
+    rz = wb[RZ]
+    # портим данные: делаем часть чисел текстом (как в реальных выгрузках)
+    rz["C5"] = "5 439"; rz["K5"] = "8 799"; rz["C6"] = "120"
+    buf = BytesIO(); wb.save(buf)
+
+    out = build_calculations(buf.getvalue(), capacity=200)
+    r = openpyxl.load_workbook(BytesIO(out))[RZ]
+    assert r["C5"].value == 5439 and isinstance(r["C5"].value, (int, float))
+    assert r["K5"].value == 8799
+    assert r["C6"].value == 120
+    # даты и номера игр не пострадали
+    assert isinstance(r["A5"].value, int)
+
+
 def test_missing_required_sheet_raises():
     wb = openpyxl.Workbook()
     buf = BytesIO(); wb.save(buf)
