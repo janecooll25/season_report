@@ -241,7 +241,7 @@ def _prep_protocol_column(rz, reg, po) -> None:
 
 
 def _build_calc_sheet(wb, season_label: str, capacity_value: int,
-                      byn_to_rub: float | None = None) -> None:
+                      fx: tuple[str, float | None] | None = None) -> None:
     rz = wb[RZ]
     dh = wb[DH]
     if AG in wb.sheetnames:
@@ -276,11 +276,14 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int,
     ws["H2"].number_format = NUM
     CAP = "$H$2"
 
-    # H3 — курс BYN→RUB (если суммы в белорусских рублях). Редактируемый.
-    if byn_to_rub:
-        ws["G3"] = "Курс BYN→RUB (на 01.07.2025):"
+    # H3 — курс иностранной валюты к RUB (если суммы не в рублях РФ).
+    # Редактируемый; значение можно оставить пустым — клуб впишет курс сам.
+    if fx:
+        code, rate_val = fx
+        ws["G3"] = f"Курс {code}→RUB:"
         ws["G3"].font = _HDR
-        ws["H3"] = byn_to_rub
+        if rate_val is not None:
+            ws["H3"] = rate_val
         ws["H3"].font = _INPUT
         ws["H3"].number_format = "0.0000"
         RATE: str | None = "$H$3"
@@ -464,11 +467,16 @@ def _build_calc_sheet(wb, season_label: str, capacity_value: int,
 def build_calculations(
     input_bytes: bytes, capacity: int | None = None, season_label: str = "2025/2026",
     byn_to_rub: float | None = None,
+    currency: str | None = None, rate: float | None = None,
 ) -> bytes:
     """Из xlsx-байтов возвращает xlsx-байты с добавленным листом «Расчеты».
 
-    byn_to_rub — курс белорусского рубля к RUB; если задан, денежные метрики
-    считаются в рублях РФ (× курс, редактируемый в ячейке H3).
+    Пересчёт валюты в рубли РФ:
+      • currency — код валюты выгрузки («KZT», «BYN» …); если задан, денежные
+        метрики считаются в рублях РФ (× курс из редактируемой ячейки H3);
+      • rate — значение курса для H3; None — оставить ячейку пустой (клуб
+        впишет курс сам);
+      • byn_to_rub — устаревший алиас для currency="BYN", rate=byn_to_rub.
     """
     try:
         wb = openpyxl.load_workbook(BytesIO(input_bytes))
@@ -484,8 +492,14 @@ def build_calculations(
         if name in wb.sheetnames:
             _coerce_numeric_text(wb[name])
 
+    fx: tuple[str, float | None] | None = None
+    if currency:
+        fx = (currency, rate)
+    elif byn_to_rub is not None:
+        fx = ("BYN", byn_to_rub)
+
     cap = capacity or _default_capacity(BytesIO(input_bytes))
-    _build_calc_sheet(wb, season_label, cap, byn_to_rub=byn_to_rub)
+    _build_calc_sheet(wb, season_label, cap, fx=fx)
 
     # Принудительный полный пересчёт формул при открытии (Excel/Sheets),
     # т.к. openpyxl не сохраняет кэш значений формул.

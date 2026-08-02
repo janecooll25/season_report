@@ -150,6 +150,16 @@ def test_currency_conversion_adds_rate_cell_and_multiplies():
     assert "руб. РФ" in ws["B32"].value
 
 
+def test_currency_rate_cell_can_be_left_blank():
+    """currency без rate — ячейка H3 пустая (курс впишет клуб), но пересчёт есть."""
+    out = build_calculations(_make_raw(), capacity=200, currency="KZT")
+    ws = openpyxl.load_workbook(BytesIO(out))["Расчеты"]
+    assert ws["H3"].value is None          # курс не проставлен
+    assert "KZT" in str(ws["G3"].value)    # подпись под нужную валюту
+    assert ws["C34"].value.endswith("*$H$3")  # формулы всё равно умножают на курс
+    assert "руб. РФ" in ws["B32"].value
+
+
 def test_missing_required_sheet_raises():
     wb = openpyxl.Workbook()
     buf = BytesIO(); wb.save(buf)
