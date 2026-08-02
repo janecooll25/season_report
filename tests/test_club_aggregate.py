@@ -9,7 +9,7 @@ from test_ticket_metrics import _make_raw
 from yandex_report.club_aggregate import (
     MAX_CLUBS, aggregate_clubs, build_aggregate_docx, compute_club_metrics,
 )
-from yandex_report.ticket_metrics import TicketError
+from yandex_report.ticket_metrics import RZ, TicketError
 
 
 def test_compute_club_metrics_basic():
@@ -57,6 +57,24 @@ def test_aggregate_docx_lists_params_and_places():
     assert hdr == ["Место", "Клуб", "Значение", "Градация"]
     places = [doc.tables[0].rows[i].cells[0].text for i in range(1, 3)]
     assert places == ["1", "2"]
+
+
+def test_paid_column_as_formula_is_evaluated():
+    """Столбец «платные билеты» задан формулой (=всего−беспл.) без кэша значений."""
+    wb = openpyxl.load_workbook(BytesIO(_make_raw()))
+    rz = wb[RZ]
+    for r in (5, 6, 8):  # как в реальных выгрузках: только разовые + беспл., C = K − D
+        for c in range(5, 11):  # обнуляем абонементы/бизнес/ложи (E..J)
+            rz.cell(r, c).value = 0
+        rz.cell(r, 11).value = rz.cell(r, 3).value + rz.cell(r, 4).value  # K = C + D
+        rz.cell(r, 3).value = f"=K{r}-D{r}"                               # C — формулой
+    buf = BytesIO(); wb.save(buf)
+
+    m = compute_club_metrics(buf.getvalue(), capacity=200)
+    # цена регулярки считается (формула C прочитана, а не взята за 0)
+    assert m["price_reg"] is not None and m["price_reg"] > 0
+    # посещаемость = сумма K: (100+10)+(120+8)+(200+4) = 442
+    assert m["att_season"] == 442
 
 
 def test_too_many_files_raises():

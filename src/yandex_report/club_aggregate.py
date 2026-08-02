@@ -6,23 +6,73 @@
 """
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import column_index_from_string, range_boundaries
 
 from .ticket_metrics import (
     AG, DH, RZ, TicketError, _agent_commission_range, _agent_rows,
-    _coerce_numeric_text, _section_spans,
+    _coerce_numeric_text, _section_spans, _to_number,
 )
 
 MAX_CLUBS = 22
 
 
 # ── чтение числовых значений ────────────────────────────────────────────────
-def _num(ws, r: int, c: int) -> float:
+# В части выгрузок ячейки заданы формулами (напр. столбец «платные билеты» =
+# «всего − бесплатные», =SUM(...)), а кэш значений в файле отсутствует. openpyxl
+# формулы не считает, поэтому здесь — мини-вычислитель простых формул того же
+# листа (SUM(диапазон) и арифметика +−*/ по ссылкам на ячейки).
+_SUM_RE = re.compile(r"SUM\(([^)]+)\)", re.IGNORECASE)
+_CELL_RE = re.compile(r"\$?([A-Z]{1,3})\$?(\d+)")
+_SAFE_RE = re.compile(r"^[\d\s+\-*/().]*$")
+
+
+def _eval_formula(ws, formula: str, seen: frozenset) -> float:
+    expr = formula.lstrip("=").strip()
+
+    def _sum_sub(mo: re.Match) -> str:
+        min_c, min_r, max_c, max_r = range_boundaries(mo.group(1).replace("$", ""))
+        total = sum(_cell_value(ws, r, c, seen)
+                    for r in range(min_r, max_r + 1)
+                    for c in range(min_c, max_c + 1))
+        return repr(float(total))
+
+    expr = _SUM_RE.sub(_sum_sub, expr)
+    expr = _CELL_RE.sub(
+        lambda mo: repr(_cell_value(ws, int(mo.group(2)),
+                                    column_index_from_string(mo.group(1)), seen)),
+        expr,
+    )
+    if not _SAFE_RE.match(expr):
+        return 0.0
+    try:
+        return float(eval(expr, {"__builtins__": {}}, {}))  # noqa: S307 — expr санитизирован
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _cell_value(ws, r: int, c: int, seen: frozenset = frozenset()) -> float:
     v = ws.cell(r, c).value
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s.startswith("="):
+            key = (r, c)
+            if key in seen:  # защита от циклических ссылок
+                return 0.0
+            return _eval_formula(ws, s, seen | {key})
+        num = _to_number(s)  # число, записанное текстом
+        return float(num) if num is not None else 0.0
+    return 0.0
+
+
+def _num(ws, r: int, c: int) -> float:
+    return _cell_value(ws, r, c)
 
 
 def _sum_col(ws, col: int, span) -> float:
