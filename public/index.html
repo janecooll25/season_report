@@ -159,20 +159,12 @@
           </div>
         </div>
 
-        <label for="sp-ticket">Билетный файл клуба (xlsx, необязательно)</label>
-        <input type="file" id="sp-ticket" accept=".xlsx" />
-        <p class="hint">Даёт значения текущего сезона (доля онлайн, средняя цена,
-          доля бесплатных), если в мониторинге они ещё не заполнены.</p>
-        <div class="row">
-          <div>
-            <label for="sp-cap">Вместимость арены</label>
-            <input type="text" id="sp-cap" placeholder="необяз." inputmode="numeric" />
-          </div>
-          <div>
-            <label for="sp-rate">Курс валюты→RUB</label>
-            <input type="text" id="sp-rate" placeholder="1 (RUB)" inputmode="decimal" />
-          </div>
-        </div>
+        <label for="sp-agg">Агрегированный файл клубов (xlsx «Средние по клубам», необязательно)</label>
+        <input type="file" id="sp-agg" accept=".xlsx" />
+        <p class="hint">Один общий файл со всеми клубами (создаётся на вкладке
+          «Агрегат по клубам», формат xlsx). Даёт значения текущего сезона —
+          доля онлайн, средняя цена, доля бесплатных и агентская комиссия — по
+          выбранному клубу, если в мониторинге они ещё не заполнены.</p>
 
         <label for="sp-income">Файл доходов регионов Росстата (xlsx, необязательно)</label>
         <input type="file" id="sp-income" accept=".xlsx" />
@@ -420,12 +412,10 @@
             club,
             season: document.getElementById('sp-season').value.trim() || '25/26',
             prev_season: document.getElementById('sp-prev').value.trim() || '24/25',
-            capacity: document.getElementById('sp-cap').value.replace(/\D/g, ''),
-            to_rub: document.getElementById('sp-rate').value.replace(',', '.').replace(/[^\d.]/g, ''),
             income_year: document.getElementById('sp-year').value.trim() || '2025',
           };
-          const ticket = document.getElementById('sp-ticket');
-          if (ticket.files.length) body.ticket_b64 = await readBase64(ticket.files[0]);
+          const agg = document.getElementById('sp-agg');
+          if (agg.files.length) body.aggregate_b64 = await readBase64(agg.files[0]);
           const income = document.getElementById('sp-income');
           if (income.files.length) body.income_b64 = await readBase64(income.files[0]);
           const bodyStr = JSON.stringify(body);

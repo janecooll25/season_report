@@ -141,6 +141,20 @@ def test_region_note_in_price_recommendation():
     assert "Омская область" in price_rec and "среднедушев" in price_rec.lower()
 
 
+def test_commission_row_and_aggregate_source():
+    from yandex_report.club_aggregate import aggregate_clubs
+    agg = aggregate_clubs([("Авангард.xlsx", _make_raw()),
+                           ("Сибирь.xlsx", _make_raw())], capacity=200)
+    out = build_club_report(_make_monitoring_real(), "Авангард", season="25/26",
+                            prev_season="24/25", aggregate_bytes=agg)
+    rows = _rows_by_param(out)
+    # строка агентской комиссии присутствует
+    assert any("комисси" in k.lower() for k in rows)
+    # значение онлайна взято из агрегата (_make_raw: 300 из 400 = 75%)
+    online = next(v[0] for k, v in rows.items() if "интернет" in k)
+    assert "75%" in online
+
+
 def test_current_season_from_ticket_file():
     # 25/26 в мониторинге пуст → значения берутся из билетного файла
     out = build_club_report(_make_monitoring(), "Альфа", season="25/26",

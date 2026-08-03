@@ -2,8 +2,11 @@
 
 POST /api/spravka
   • {list_clubs:true, monitoring_b64}                       → JSON {clubs:[...]}
-  • {monitoring_b64, club, season?, prev_season?,
+  • {monitoring_b64, club, season?, prev_season?, aggregate_b64?,
      ticket_b64?, capacity?, to_rub?, income_b64?, income_year?} → docx
+
+aggregate_b64 — общий файл «Средние по клубам» (данные текущего сезона по всем
+клубам, включая агентскую комиссию); альтернатива отдельному билетному файлу.
 """
 from __future__ import annotations
 
@@ -75,6 +78,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             data = build_club_report(
                 monitoring, club, season=season, prev_season=prev_season,
+                aggregate_bytes=_b64(payload, "aggregate_b64"),
                 ticket_bytes=_b64(payload, "ticket_b64"),
                 capacity=int(capacity) if capacity else None, to_rub=to_rub,
                 region_income_bytes=_b64(payload, "income_b64"), income_year=income_year,

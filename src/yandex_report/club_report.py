@@ -12,7 +12,7 @@ from io import BytesIO
 
 import openpyxl
 
-from .club_aggregate import compute_club_metrics
+from .club_aggregate import compute_club_metrics, parse_aggregate_clubs
 from .ticket_metrics import TicketError
 
 MONITOR_SHEET = "Чек-лист мониторинг"
@@ -26,21 +26,25 @@ PARAM_PRICE = "Средняя цена коммерческой реализац
 PARAM_FREE = "Процент билетов и абонементов, распространяемых на безвозмездной основе"
 PARAM_DEV = ("Отклонение данных официальных протоколов матчей от данных выгрузок "
              "из билетной системы по выбранным играм")
+PARAM_COMMISSION = "Размер партнерской комиссии по договору на реализацию билетов"
 
 TICKET_PARAMS = [
-    # (col_start, name, kind, better)  kind: share|money|grade
+    # (col_start, name, kind, better)  kind: share|money|grade|commission
+    # col_start=None — параметра нет в файле мониторинга (берётся из агрегата/билетов)
     (2, PARAM_DEV, "grade", "asc"),
     (10, PARAM_ONLINE, "share", "desc"),
+    (None, PARAM_COMMISSION, "commission", "asc"),
     (18, PARAM_PRICE, "money", "desc"),
     (26, PARAM_FREE, "share", "asc"),
 ]
 
-# Ключи из compute_club_metrics для значений текущего сезона.
+# Ключи из compute_club_metrics / агрегата для значений текущего сезона.
 METRIC_KEY = {
     PARAM_ONLINE: "online_share",
     PARAM_PRICE: "price_reg",
     PARAM_FREE: "free_share",
     PARAM_DEV: "deviation",
+    PARAM_COMMISSION: "commission",
 }
 
 GRADES = {3: "Хорошие показатели", 2: "Удовлетворительные показатели",
@@ -251,6 +255,18 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         if not rec:
             rec = "Рекомендации отсутствуют."
 
+    elif kind == "commission":
+        pos = [v for v in vals if v > 0]           # среднее по клубам, работающим с агентами
+        avg_pos = sum(pos) / len(pos) if pos else None
+        if cur is None or cur == 0:
+            char = "Клуб не работает с агентами для реализации билетов."
+        else:
+            char = (f"Размер агентской комиссии по договорам на реализацию билетов "
+                    f"составляет {_pct(cur)}.")
+        if avg_pos is not None:
+            char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
+        rec = "Рекомендации отсутствуют."
+
     else:  # grade — отклонение протоколов
         # из мониторинга приходит градация 1/2/3, из билетного файла — доля (0..1)
         is_grade = cur is not None and cur >= 1
@@ -270,8 +286,8 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
 
     # градация/место
     grade_label = ""
-    if kind in ("share", "money") and league_all:
-        place = _place(better, league_all, club, cur)
+    if kind in ("share", "money", "commission") and league_all:
+        place = _place(better, league_all, club, 0 if (kind == "commission" and not cur) else cur)
         if place:
             grade_label = GRADES[_grade_by_place(place, len(league_all))]
     elif kind == "grade" and cur is not None:
@@ -288,11 +304,15 @@ def build_club_report(
     prev_season: str = "24/25", ticket_bytes: bytes | None = None,
     capacity: int | None = None, to_rub: float = 1.0,
     region_income_bytes: bytes | None = None, income_year: str = "2025",
+    aggregate_bytes: bytes | None = None,
 ) -> bytes:
     """docx-справка по билетной программе клуба за сезон.
 
-    Значения текущего сезона: из ticket_bytes (если задан) или из колонки season
-    файла мониторинга. Прошлый сезон, среднее/мин/макс и место — из мониторинга.
+    Значения текущего сезона (в порядке приоритета): из колонки season файла
+    мониторинга → из агрегированного файла клубов (aggregate_bytes) → из
+    отдельного билетного файла (ticket_bytes). Прошлый сезон и история — из
+    мониторинга. aggregate_bytes — один общий файл «Средние по клубам» со всеми
+    клубами (в т.ч. агентская комиссия), удобнее отдельного файла на клуб.
     region_income_bytes — файл Росстата (СДД по субъектам); если задан, в
     рекомендацию по цене добавляется место региона клуба по доходам населения.
     """
@@ -307,8 +327,14 @@ def build_club_report(
         raise ReportError(f"Клуб «{club}» не найден в файле мониторинга. "
                           f"Доступны: {', '.join(sorted(rows))}.")
 
-    metrics = None
-    if ticket_bytes is not None:
+    # Данные текущего сезона: из общего агрегата (по всем клубам) либо из
+    # отдельного билетного файла клуба.
+    metrics = None            # значения выбранного клуба
+    agg_clubs: dict = {}      # значения всех клубов (для средней комиссии по Лиге)
+    if aggregate_bytes is not None:
+        agg_clubs = parse_aggregate_clubs(aggregate_bytes)
+        metrics = agg_clubs.get(club, {})
+    elif ticket_bytes is not None:
         metrics = compute_club_metrics(ticket_bytes, capacity=capacity, to_rub=to_rub)
 
     region_note = ""
@@ -412,20 +438,25 @@ def build_club_report(
 
     first_data = len(table.rows)
     for col_start, param, kind, better in TICKET_PARAMS:
-        cur_idx = _season_index(ws, col_start, season)
-        prev_idx = _season_index(ws, col_start, prev_season)
+        cur_idx = _season_index(ws, col_start, season) if col_start else None
+        prev_idx = _season_index(ws, col_start, prev_season) if col_start else None
         cur = None
-        if cur_idx is not None:
+        if col_start and cur_idx is not None:
             cur = _num(ws.cell(rows[club], col_start + cur_idx).value)
         if cur is None and metrics is not None:
             cur = metrics.get(METRIC_KEY.get(param))
-        prev = _num(ws.cell(rows[club], col_start + prev_idx).value) if prev_idx is not None else None
+        prev = (_num(ws.cell(rows[club], col_start + prev_idx).value)
+                if col_start and prev_idx is not None else None)
 
         league_all = {}
-        if kind in ("share", "money"):
+        if kind in ("share", "money") and col_start:
             li = _latest_league_index(ws, rows, col_start, cur_idx)
             if li is not None:
                 league_all = _column_values(ws, rows, col_start, li)
+        elif kind == "commission" and agg_clubs:
+            # средняя комиссия по Лиге — из агрегата (все клубы)
+            league_all = {c: m["commission"] for c, m in agg_clubs.items()
+                          if isinstance(m.get("commission"), (int, float))}
 
         char, rec, grade_label = _describe(
             param, kind, better, cur, prev, league_all, club,

@@ -103,6 +103,43 @@ PARAMS: list[tuple[str, str, str, str, bool]] = [
 ]
 
 
+AGG_SHEET = "Средние по клубам"
+
+
+def parse_aggregate_clubs(agg_bytes: bytes) -> dict[str, dict[str, float]]:
+    """Из книги «Средние по клубам» → {клуб: {ключ метрики: значение}}.
+
+    Позволяет брать данные текущего сезона по всем клубам из одного
+    агрегированного файла вместо отдельного билетного файла на каждый клуб.
+    """
+    wb = openpyxl.load_workbook(BytesIO(agg_bytes), data_only=True)
+    ws = wb[AGG_SHEET] if AGG_SHEET in wb.sheetnames else wb[wb.sheetnames[0]]
+    label_key = {label: key for key, label, *_ in PARAMS}
+    result: dict[str, dict[str, float]] = {}
+    cur_key = None
+    in_table = False
+    for r in range(1, ws.max_row + 1):
+        a = ws.cell(r, 1).value
+        if not isinstance(a, str) or not a.strip():
+            continue
+        s = a.strip()
+        matched = next((k for lbl, k in label_key.items() if s.startswith(lbl)), None)
+        if matched:                       # заголовок секции параметра
+            cur_key, in_table = matched, False
+            continue
+        if s == "Клуб":                   # шапка таблицы клубов
+            in_table = True
+            continue
+        if s in ("Среднее по Лиге", "Минимум", "Максимум") or s.startswith("Не обработаны"):
+            in_table = False
+            continue
+        if in_table and cur_key:
+            v = ws.cell(r, 2).value
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                result.setdefault(s, {})[cur_key] = float(v)
+    return result
+
+
 def compute_club_metrics(input_bytes: bytes, capacity: int | None = None,
                          to_rub: float = 1.0) -> dict[str, float | None]:
     """Числовые метрики одного клуба (без формул).
