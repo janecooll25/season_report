@@ -36,7 +36,7 @@
       border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px;
     }
     input[type=file] { padding: 8px; }
-    #agg-format {
+    #agg-format, #sp-club {
       width: 100%; padding: 9px 11px; border: 1px solid var(--border);
       border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 14px;
     }
@@ -88,6 +88,7 @@
       <button type="button" id="tab-csv">CSV-выгрузки</button>
       <button type="button" id="tab-tickets">Билеты (метрики)</button>
       <button type="button" id="tab-agg">Агрегат по клубам</button>
+      <button type="button" id="tab-spravka">Справка по клубу</button>
     </div>
 
     <form id="f">
@@ -137,9 +138,59 @@
         </select>
       </div>
 
-      <label for="season">Метка сезона</label>
-      <input type="text" id="season" placeholder="2025/2026" />
-      <p class="hint">Подставляется в заголовки. По умолчанию — по датам данных.</p>
+      <!-- Справка по клубу -->
+      <div id="pane-spravka" class="hidden">
+        <label for="sp-mon">Файл мониторинга КХЛ (xlsx)</label>
+        <input type="file" id="sp-mon" accept=".xlsx" />
+        <p class="hint">Лист «Чек-лист мониторинг»: история по сезонам, среднее/мин/макс
+          и место по Лиге. После загрузки выберите клуб.</p>
+
+        <label for="sp-club">Клуб</label>
+        <select id="sp-club"><option value="">— сначала загрузите файл мониторинга —</option></select>
+
+        <div class="row">
+          <div>
+            <label for="sp-season">Сезон справки</label>
+            <input type="text" id="sp-season" value="25/26" />
+          </div>
+          <div>
+            <label for="sp-prev">Прошлый сезон</label>
+            <input type="text" id="sp-prev" value="24/25" />
+          </div>
+        </div>
+
+        <label for="sp-ticket">Билетный файл клуба (xlsx, необязательно)</label>
+        <input type="file" id="sp-ticket" accept=".xlsx" />
+        <p class="hint">Даёт значения текущего сезона (доля онлайн, средняя цена,
+          доля бесплатных), если в мониторинге они ещё не заполнены.</p>
+        <div class="row">
+          <div>
+            <label for="sp-cap">Вместимость арены</label>
+            <input type="text" id="sp-cap" placeholder="необяз." inputmode="numeric" />
+          </div>
+          <div>
+            <label for="sp-rate">Курс валюты→RUB</label>
+            <input type="text" id="sp-rate" placeholder="1 (RUB)" inputmode="decimal" />
+          </div>
+        </div>
+
+        <label for="sp-income">Файл доходов регионов Росстата (xlsx, необязательно)</label>
+        <input type="file" id="sp-income" accept=".xlsx" />
+        <div class="row">
+          <div>
+            <label for="sp-year">Год дохода</label>
+            <input type="text" id="sp-year" value="2025" />
+          </div>
+        </div>
+        <p class="hint">Добавит место региона клуба среди регионов присутствия КХЛ
+          по среднедушевым доходам населения.</p>
+      </div>
+
+      <div id="season-block">
+        <label for="season">Метка сезона</label>
+        <input type="text" id="season" placeholder="2025/2026" />
+        <p class="hint">Подставляется в заголовки. По умолчанию — по датам данных.</p>
+      </div>
 
       <div id="report-only">
         <label class="check">
@@ -207,10 +258,12 @@
     const tabCsv = document.getElementById('tab-csv');
     const tabTickets = document.getElementById('tab-tickets');
     const tabAgg = document.getElementById('tab-agg');
+    const tabSpravka = document.getElementById('tab-spravka');
     const paneApi = document.getElementById('pane-api');
     const paneCsv = document.getElementById('pane-csv');
     const paneTickets = document.getElementById('pane-tickets');
     const paneAgg = document.getElementById('pane-agg');
+    const paneSpravka = document.getElementById('pane-spravka');
 
     function setMode(m) {
       mode = m;
@@ -218,22 +271,49 @@
       tabCsv.classList.toggle('active', m === 'csv');
       tabTickets.classList.toggle('active', m === 'tickets');
       tabAgg.classList.toggle('active', m === 'agg');
+      tabSpravka.classList.toggle('active', m === 'spravka');
       paneApi.classList.toggle('hidden', m !== 'api');
       paneCsv.classList.toggle('hidden', m !== 'csv');
       paneTickets.classList.toggle('hidden', m !== 'tickets');
       paneAgg.classList.toggle('hidden', m !== 'agg');
-      const isTickets = m === 'tickets' || m === 'agg';
+      paneSpravka.classList.toggle('hidden', m !== 'spravka');
+      const noReport = m === 'tickets' || m === 'agg' || m === 'spravka';
       // Текст и диаграммы — только для отчёта по аудитории.
-      document.getElementById('report-only').classList.toggle('hidden', isTickets);
+      document.getElementById('report-only').classList.toggle('hidden', noReport);
+      // Справка использует собственные поля сезона.
+      document.getElementById('season-block').classList.toggle('hidden', m === 'spravka');
       document.getElementById('btn').textContent =
         m === 'tickets' ? 'Рассчитать метрики'
         : m === 'agg' ? 'Собрать агрегат'
+        : m === 'spravka' ? 'Сформировать справку'
         : 'Сформировать отчёт';
     }
     tabApi.onclick = () => setMode('api');
     tabCsv.onclick = () => setMode('csv');
     tabTickets.onclick = () => setMode('tickets');
     tabAgg.onclick = () => setMode('agg');
+    tabSpravka.onclick = () => setMode('spravka');
+
+    // Справка: после выбора файла мониторинга — подгружаем список клубов.
+    const spMon = document.getElementById('sp-mon');
+    const spClub = document.getElementById('sp-club');
+    spMon.addEventListener('change', async () => {
+      if (!spMon.files.length) return;
+      spClub.innerHTML = '<option value="">загрузка списка клубов…</option>';
+      try {
+        const b64 = await readBase64(spMon.files[0]);
+        const resp = await fetch('/api/spravka', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ list_clubs: true, monitoring_b64: b64 }),
+        });
+        if (!resp.ok) throw new Error(await errorText(resp));
+        const { clubs } = await resp.json();
+        spClub.innerHTML = '<option value="">— выберите клуб —</option>' +
+          clubs.map((c) => '<option>' + c + '</option>').join('');
+      } catch (err) {
+        spClub.innerHTML = '<option value="">ошибка: ' + err.message + '</option>';
+      }
+    });
 
     // По умолчанию — текущий сезон КХЛ (1 июля — 30 июня).
     (function () {
@@ -331,6 +411,29 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content_b64: b64, capacity, season }),
           });
+        } else if (mode === 'spravka') {
+          if (!spMon.files.length) throw new Error('Приложите файл мониторинга.');
+          const club = spClub.value;
+          if (!club) throw new Error('Выберите клуб.');
+          const body = {
+            monitoring_b64: await readBase64(spMon.files[0]),
+            club,
+            season: document.getElementById('sp-season').value.trim() || '25/26',
+            prev_season: document.getElementById('sp-prev').value.trim() || '24/25',
+            capacity: document.getElementById('sp-cap').value.replace(/\D/g, ''),
+            to_rub: document.getElementById('sp-rate').value.replace(',', '.').replace(/[^\d.]/g, ''),
+            income_year: document.getElementById('sp-year').value.trim() || '2025',
+          };
+          const ticket = document.getElementById('sp-ticket');
+          if (ticket.files.length) body.ticket_b64 = await readBase64(ticket.files[0]);
+          const income = document.getElementById('sp-income');
+          if (income.files.length) body.income_b64 = await readBase64(income.files[0]);
+          const bodyStr = JSON.stringify(body);
+          const gz = await gzipBody(bodyStr);
+          const headers = { 'Content-Type': 'application/json' };
+          let payload = bodyStr;
+          if (gz) { headers['Content-Encoding'] = 'gzip'; payload = gz; }
+          resp = await fetch('/api/spravka', { method: 'POST', headers, body: payload });
         } else if (mode === 'agg') {
           const input = document.getElementById('xlsx-agg');
           if (!input.files.length) throw new Error('Приложите хотя бы один файл клуба.');
@@ -375,7 +478,7 @@
         msg.textContent = 'Ошибка: ' + err.message;
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Сформировать отчёт';
+        setMode(mode);  // восстанавливаем подпись кнопки под текущий режим
       }
     });
   </script>
