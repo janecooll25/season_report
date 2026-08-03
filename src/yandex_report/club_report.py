@@ -74,6 +74,19 @@ CLUB_REGION: dict[str, str | None] = {
 }
 REGION_INCOME_SHEET = "СДД_субъекты"
 
+# ── дизайн справки (по образцу шаблона) ─────────────────────────────────────
+FONT_NAME = "Times New Roman"
+FILL_HEADER = "BFBFBF"          # серый — шапка и легенда
+FILL_WHITE = "FFFFFF"
+GRADE_FILL = {                  # заливка ячейки «Характеристика» по градации
+    "Хорошие показатели": "C5E0B3",            # зелёный
+    "Удовлетворительные показатели": "FFE599",  # жёлтый
+    "Неудовлетворительные показатели": "FF9999",  # красный
+}
+COL_WIDTHS = [1571, 2388, 4253, 7508]  # ширины столбцов, DXA (как в шаблоне)
+HEADER_TITLES = ("Направление деятельности", "Параметр",
+                 "Характеристика/ место Клуба в Лиге по параметру", "Рекомендации")
+
 
 class ReportError(TicketError):
     pass
@@ -262,8 +275,8 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         if place:
             grade_label = GRADES[_grade_by_place(place, len(league_all))]
     elif kind == "grade" and cur is not None:
-        if cur >= 1:  # градация уже указана в тексте характеристики
-            grade_label = ""
+        if cur >= 1:  # градация из мониторинга (1/2/3)
+            grade_label = GRADES.get(int(round(cur)), "")
         else:         # доля из билетного файла: меньше — лучше
             grade_label = GRADES[3 if cur <= 0.02 else (2 if cur <= 0.05 else 1)]
     return _tidy(char), _tidy(rec), grade_label
@@ -309,26 +322,98 @@ def build_club_report(
                 f"регионов присутствия КХЛ по среднедушевым денежным доходам населения "
                 f"({_rub(val)}/мес).")
 
+    from docx.enum.section import WD_ORIENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Twips
+
+    def _font(run, size_pt: float, bold: bool = False) -> None:
+        run.font.name = FONT_NAME
+        run.font.size = Pt(size_pt)
+        run.font.bold = bold
+        rpr = run._element.get_or_add_rPr()
+        rf = rpr.find(qn("w:rFonts"))
+        if rf is None:
+            rf = OxmlElement("w:rFonts")
+            rpr.insert(0, rf)
+        for attr in ("w:ascii", "w:hAnsi", "w:cs"):
+            rf.set(qn(attr), FONT_NAME)
+
+    def _shade(cell, hex6: str) -> None:
+        tcpr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), hex6)
+        tcpr.append(shd)
+
+    def _fill_cell(cell, text: str, size: float = 10, bold: bool = False,
+                   fill: str | None = None, center: bool = False) -> None:
+        cell.text = ""
+        para = cell.paragraphs[0]
+        if center:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        lines = str(text).split("\n")
+        run = para.add_run(lines[0])
+        _font(run, size, bold)
+        for extra in lines[1:]:
+            run.add_break()
+            run = para.add_run(extra)
+            _font(run, size, bold)
+        if fill:
+            _shade(cell, fill)
+
     doc = Document()
-    h = doc.add_heading(
-        f"Аналитическая справка по коммерческой деятельности "
-        f"ХК «{club}» в сезоне {_season_full(season)} годов", level=1)
-    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sec = doc.sections[0]
+    sec.orientation = WD_ORIENT.LANDSCAPE
+    sec.page_width, sec.page_height = Twips(16838), Twips(11906)
+    sec.top_margin = sec.bottom_margin = Twips(567)
+    sec.left_margin = sec.right_margin = Twips(567)
 
-    table = doc.add_table(rows=1, cols=4)
+    # «ПРИЛОЖЕНИЕ №1» — справа сверху, как в шаблоне.
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r = p.add_run("ПРИЛОЖЕНИЕ №1\nк исх.№_______")
+    _font(r, 14)
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(f"Аналитическая справка по коммерческой деятельности "
+                  f"ХК «{club}» в сезоне {_season_full(season)} годов")
+    _font(r, 13, bold=True)
+
+    table = doc.add_table(rows=0, cols=4)
     table.style = "Table Grid"
-    for i, t in enumerate(("Направление деятельности", "Параметр",
-                           "Характеристика / место Клуба в Лиге по параметру", "Рекомендации")):
-        cell = table.rows[0].cells[i]
-        cell.text = t
-        for p in cell.paragraphs:
-            for run in p.runs:
-                run.bold = True
+    table.autofit = False
+    table.allow_autofit = False
+    # фиксируем ширины столбцов в сетке таблицы (как в шаблоне)
+    for gc, w in zip(table._tbl.tblGrid.findall(qn("w:gridCol")), COL_WIDTHS):
+        gc.set(qn("w:w"), str(w))
 
+    def _add_row(values, sizes=10, bolds=False, fills=(None, None, None, None)):
+        cells = table.add_row().cells
+        for i, cell in enumerate(cells):
+            size = sizes[i] if isinstance(sizes, (list, tuple)) else sizes
+            bold = bolds[i] if isinstance(bolds, (list, tuple)) else bolds
+            _fill_cell(cell, values[i], size=size, bold=bold, fill=fills[i],
+                       center=(i != 3))
+            cell.width = Twips(COL_WIDTHS[i])
+        return cells
+
+    # шапка
+    _add_row(HEADER_TITLES, sizes=10, bolds=True,
+             fills=(FILL_HEADER, FILL_HEADER, FILL_HEADER, FILL_HEADER))
+    # легенда градаций (цвет — в столбце «Характеристика»)
+    for label, fill in (("Хорошие показатели", GRADE_FILL["Хорошие показатели"]),
+                        ("Удовлетворительные показатели", GRADE_FILL["Удовлетворительные показатели"]),
+                        ("Неудовлетворительные показатели", GRADE_FILL["Неудовлетворительные показатели"])):
+        _add_row(("", "", label, ""), sizes=10, bolds=False,
+                 fills=(FILL_HEADER, FILL_HEADER, fill, FILL_HEADER))
+
+    first_data = len(table.rows)
     for col_start, param, kind, better in TICKET_PARAMS:
         cur_idx = _season_index(ws, col_start, season)
         prev_idx = _season_index(ws, col_start, prev_season)
-        # текущее значение
         cur = None
         if cur_idx is not None:
             cur = _num(ws.cell(rows[club], col_start + cur_idx).value)
@@ -336,7 +421,6 @@ def build_club_report(
             cur = metrics.get(METRIC_KEY.get(param))
         prev = _num(ws.cell(rows[club], col_start + prev_idx).value) if prev_idx is not None else None
 
-        # Лига по последнему заполненному сезону (для среднего/мин/макс/места)
         league_all = {}
         if kind in ("share", "money"):
             li = _latest_league_index(ws, rows, col_start, cur_idx)
@@ -346,15 +430,15 @@ def build_club_report(
         char, rec, grade_label = _describe(
             param, kind, better, cur, prev, league_all, club,
             region_note=region_note if param == PARAM_PRICE else "")
-        row = table.add_row().cells
-        row[0].text = DIRECTION_TICKET
-        row[1].text = param
-        row[2].text = (char + (f"\n\n{grade_label}." if grade_label else ""))
-        row[3].text = rec
+        char_fill = GRADE_FILL.get(grade_label, FILL_WHITE)
+        _add_row((DIRECTION_TICKET, param, char, rec or "Рекомендации отсутствуют."),
+                 sizes=10, bolds=False, fills=(None, FILL_WHITE, char_fill, None))
 
-    for p in doc.paragraphs:
-        for run in p.runs:
-            run.font.size = run.font.size or Pt(11)
+    # объединяем столбец «Направление» по строкам билетной программы
+    last_data = len(table.rows) - 1
+    if last_data > first_data:
+        merged = table.cell(first_data, 0).merge(table.cell(last_data, 0))
+        _fill_cell(merged, DIRECTION_TICKET, size=10, center=True)
 
     out = BytesIO()
     doc.save(out)

@@ -58,8 +58,9 @@ def _rows_by_param(out):
 def test_report_from_monitoring_has_place_and_dynamics():
     out = build_club_report(_make_monitoring(), "Альфа", season="24/25", prev_season="23/24")
     doc = Document(BytesIO(out))
-    assert "«Альфа»" in doc.paragraphs[0].text
-    assert "2024/2025" in doc.paragraphs[0].text
+    all_text = "\n".join(p.text for p in doc.paragraphs)
+    assert "«Альфа»" in all_text
+    assert "2024/2025" in all_text
     rows = _rows_by_param(out)
     # цена: Альфа 900 — лучшая из трёх → 1 место, среднее (900+650+420)/3≈657
     price_char = next(v[0] for k, v in rows.items() if "Средняя цена" in k)
