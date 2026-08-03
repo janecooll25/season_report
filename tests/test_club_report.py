@@ -6,7 +6,9 @@ import openpyxl
 from docx import Document
 
 from test_ticket_metrics import _make_raw
-from yandex_report.club_report import build_club_report, list_clubs
+from yandex_report.club_report import (
+    build_club_report, list_clubs, parse_region_income, region_rank,
+)
 
 # сезоны в блоке параметра: 18/19 … 25/26 (индексы 0..7)
 SEASONS = ["18/19", "19/20", "20/21", "21/22", "22/23", "23/24", "24/25", "25/26"]
@@ -74,6 +76,68 @@ def test_deviation_grade_from_monitoring_not_percent():
     # градация 3 → «хорошие показатели», без «300%»
     assert "300%" not in dev_char
     assert "хорошие показатели" in dev_char.lower()
+
+
+def _make_income() -> bytes:
+    """Мини-файл СДД: годовой столбец 2025 в колонке 3."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "СДД_субъекты"
+    ws.cell(6, 2, "2025 год 3)")
+    ws.cell(7, 2, "I кв.")
+    ws.cell(7, 3, "год")
+    data = [
+        ("Российская Федерация", 74932),          # исключается
+        ("Сибирский федеральный округ 2)", 58485),  # исключается
+        ("Новосибирская область", 68111),         # Сибирь
+        ("Омская область", 54959),                # Авангард
+        ("г. Москва", 165866),                    # ЦСКА/Спартак/Динамо М
+        ("Республика Башкортостан", 54198),       # Салават Юлаев
+    ]
+    for i, (name, val) in enumerate(data, start=8):
+        ws.cell(i, 1, name)
+        ws.cell(i, 3, val)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_parse_region_income_and_rank():
+    inc = parse_region_income(_make_income(), year="2025")
+    assert "Новосибирская область" in inc and inc["Новосибирская область"] == 68111
+    assert "Российская Федерация" not in inc          # РФ исключена
+    assert not any("федеральн" in k.lower() for k in inc)  # ФО исключены
+    # среди 4 регионов присутствия (Новосиб, Омск, Москва, Башкортостан)
+    region, place, n, val = region_rank(inc, "Сибирь")
+    assert region == "Новосибирская область" and n == 4
+    assert place == 2 and val == 68111  # Москва 1-я, Новосибирск 2-й
+
+
+def _make_monitoring_real() -> bytes:
+    """Мониторинг с реальными названиями клубов (для привязки к регионам)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Чек-лист мониторинг"
+    ws["R5"] = "Средняя цена коммерческой реализации билетов в рамках Регулярного чемпионата"
+    for i, s in enumerate(SEASONS):
+        ws.cell(6, 18 + i, s)
+    for ri, (club, v2324, v2425) in enumerate(
+            [("Авангард", 880, 960), ("Сибирь", 906, 1019), ("ЦСКА", 1500, 1600)], start=7):
+        ws.cell(ri, 1, club)
+        ws.cell(ri, 18 + 5, v2324)
+        ws.cell(ri, 18 + 6, v2425)
+    ws.cell(10, 1, "Характеристика")
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_region_note_in_price_recommendation():
+    out = build_club_report(_make_monitoring_real(), "Авангард", season="24/25",
+                            prev_season="23/24", region_income_bytes=_make_income())
+    rows = _rows_by_param(out)
+    price_rec = next(v[1] for k, v in rows.items() if "Средняя цена" in k)
+    assert "Омская область" in price_rec and "среднедушев" in price_rec.lower()
 
 
 def test_current_season_from_ticket_file():

@@ -46,6 +46,34 @@ METRIC_KEY = {
 GRADES = {3: "Хорошие показатели", 2: "Удовлетворительные показатели",
           1: "Неудовлетворительные показатели"}
 
+# Привязка клубов КХЛ к субъектам РФ (для места региона по доходам населения).
+# Зарубежные клубы (None) в ранжирование не входят.
+CLUB_REGION: dict[str, str | None] = {
+    "Авангард": "Омская область",
+    "Автомобилист": "Свердловская область",
+    "Адмирал": "Приморский край",
+    "Ак Барс": "Республика Татарстан",
+    "Амур": "Хабаровский край",
+    "Витязь": "Московская область",
+    "Динамо Москва": "г. Москва",
+    "Лада": "Самарская область",
+    "Локомотив": "Ярославская область",
+    "Металлург": "Челябинская область",
+    "Нефтехимик": "Республика Татарстан",
+    "Салават Юлаев": "Республика Башкортостан",
+    "Северсталь": "Вологодская область",
+    "Сибирь": "Новосибирская область",
+    "СКА": "г. Санкт-Петербург",
+    "Сочи": "Краснодарский край",
+    "Спартак": "г. Москва",
+    "Торпедо": "Нижегородская область",
+    "Трактор": "Челябинская область",
+    "ЦСКА": "г. Москва",
+    "Барыс": None, "Динамо Минск": None,
+    "Куньлунь Ред Стар": None, "Шанхайские Драконы": None,
+}
+REGION_INCOME_SHEET = "СДД_субъекты"
+
 
 class ReportError(TicketError):
     pass
@@ -150,7 +178,7 @@ def _place(better: str, league_all: dict[str, float], club: str, cur) -> int | N
 
 
 def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[str, float],
-              club: str) -> tuple[str, str, str]:
+              club: str, region_note: str = "") -> tuple[str, str, str]:
     """Возвращает (характеристика, рекомендации, подпись-градация)."""
     vals = list(league_all.values())
     avg = sum(vals) / len(vals) if vals else None
@@ -202,8 +230,12 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
                    f"максимальный – {_rub(hi)}." if avg is not None else ""))
         if prev is not None and cur is not None:
             trend = "увеличилась" if cur >= prev else "уменьшилась"
-            rec = f"Средняя стоимость билета в регулярном чемпионате {trend} с {_rub(prev)} до {cur_s}"
+            rec = f"Средняя стоимость билета в регулярном чемпионате {trend} с {_rub(prev)} до {cur_s}."
         else:
+            rec = ""
+        if region_note:
+            rec = (rec + " " + region_note).strip()
+        if not rec:
             rec = "Рекомендации отсутствуют."
 
     else:  # grade — отклонение протоколов
@@ -242,11 +274,14 @@ def build_club_report(
     monitoring_bytes: bytes, club: str, season: str = "25/26",
     prev_season: str = "24/25", ticket_bytes: bytes | None = None,
     capacity: int | None = None, to_rub: float = 1.0,
+    region_income_bytes: bytes | None = None, income_year: str = "2025",
 ) -> bytes:
     """docx-справка по билетной программе клуба за сезон.
 
     Значения текущего сезона: из ticket_bytes (если задан) или из колонки season
     файла мониторинга. Прошлый сезон, среднее/мин/макс и место — из мониторинга.
+    region_income_bytes — файл Росстата (СДД по субъектам); если задан, в
+    рекомендацию по цене добавляется место региона клуба по доходам населения.
     """
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -262,6 +297,17 @@ def build_club_report(
     metrics = None
     if ticket_bytes is not None:
         metrics = compute_club_metrics(ticket_bytes, capacity=capacity, to_rub=to_rub)
+
+    region_note = ""
+    if region_income_bytes is not None:
+        rr = region_rank(parse_region_income(region_income_bytes, income_year), club)
+        if rr:
+            region, place, n, val = rr
+            region_note = (
+                f"Согласно данным Федеральной службы государственной статистики за "
+                f"{income_year} год {region} находится на {place}-м месте из {n} среди "
+                f"регионов присутствия КХЛ по среднедушевым денежным доходам населения "
+                f"({_rub(val)}/мес).")
 
     doc = Document()
     h = doc.add_heading(
@@ -297,7 +343,9 @@ def build_club_report(
             if li is not None:
                 league_all = _column_values(ws, rows, col_start, li)
 
-        char, rec, grade_label = _describe(param, kind, better, cur, prev, league_all, club)
+        char, rec, grade_label = _describe(
+            param, kind, better, cur, prev, league_all, club,
+            region_note=region_note if param == PARAM_PRICE else "")
         row = table.add_row().cells
         row[0].text = DIRECTION_TICKET
         row[1].text = param
@@ -311,6 +359,53 @@ def build_club_report(
     out = BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+def parse_region_income(income_bytes: bytes, year: str = "2025") -> dict[str, float]:
+    """{субъект РФ: среднедушевой доход, руб./мес} за годовой столбец `year`.
+
+    Столбец определяется автоматически: в строке-заголовке групп встречается
+    год, а в подзаголовке — «год» (годовое значение). Строки федеральных
+    округов и «Российская Федерация» исключаются.
+    """
+    wb = openpyxl.load_workbook(BytesIO(income_bytes), data_only=True)
+    ws = wb[REGION_INCOME_SHEET] if REGION_INCOME_SHEET in wb.sheetnames else wb[wb.sheetnames[0]]
+    # ищем годовой столбец нужного года (заголовок групп — обычно строка 6)
+    target = None
+    cur_year = None
+    for c in range(2, ws.max_column + 1):
+        y = ws.cell(6, c).value
+        if y not in (None, ""):
+            cur_year = str(y)
+        q = ws.cell(7, c).value
+        if cur_year and year in cur_year and isinstance(q, str) and q.strip().lower() == "год":
+            target = c
+            break
+    if target is None:
+        raise ReportError(f"В файле доходов не найден годовой столбец за {year} год.")
+
+    out: dict[str, float] = {}
+    for r in range(8, ws.max_row + 1):
+        name = ws.cell(r, 1).value
+        v = _num(ws.cell(r, target).value)
+        if not isinstance(name, str) or v is None:
+            continue
+        n = name.strip()
+        if "федеральн" in n.lower() or "Российская" in n:
+            continue
+        out[n] = v
+    return out
+
+
+def region_rank(income: dict[str, float], club: str) -> tuple[str, int, int, float] | None:
+    """(регион, место, всего регионов КХЛ, доход) для клуба; None — если нет региона."""
+    region = CLUB_REGION.get(club)
+    if not region or region not in income:
+        return None
+    khl_regions = {r for c, r in CLUB_REGION.items() if r and r in income}
+    ranked = sorted(khl_regions, key=lambda r: income[r], reverse=True)  # выше доход — выше место
+    place = ranked.index(region) + 1
+    return region, place, len(ranked), income[region]
 
 
 def list_clubs(monitoring_bytes: bytes) -> list[str]:
