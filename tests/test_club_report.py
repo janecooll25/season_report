@@ -45,6 +45,18 @@ def _make_monitoring() -> bytes:
     return buf.getvalue()
 
 
+def test_grade_thresholds_match_monitoring_colors():
+    from yandex_report.club_report import PARAM_FREE, PARAM_ONLINE, _grade_by_value
+    # онлайн: ≥85% хорошо, 78–85% удовл., ниже неуд.
+    assert _grade_by_value(PARAM_ONLINE, 0.92) == "Хорошие показатели"
+    assert _grade_by_value(PARAM_ONLINE, 0.80) == "Удовлетворительные показатели"
+    assert _grade_by_value(PARAM_ONLINE, 0.761) == "Неудовлетворительные показатели"
+    # бесплатные: ≤11% хорошо, 11–20% удовл., выше неуд.
+    assert _grade_by_value(PARAM_FREE, 0.08) == "Хорошие показатели"
+    assert _grade_by_value(PARAM_FREE, 0.177) == "Удовлетворительные показатели"
+    assert _grade_by_value(PARAM_FREE, 0.36) == "Неудовлетворительные показатели"
+
+
 def test_list_clubs():
     assert list_clubs(_make_monitoring()) == ["Альфа", "Бета", "Гамма"]
 

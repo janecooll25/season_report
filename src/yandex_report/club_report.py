@@ -52,6 +52,20 @@ GRADES = {3: "Хорошие показатели", 2: "Удовлетворит
 GRADE_KEY = {"Хорошие показатели": "good", "Удовлетворительные показатели": "ok",
              "Неудовлетворительные показатели": "bad"}
 
+# Пороги градации по значению — выведены из цветовой разметки прошлого сезона
+# в файле мониторинга (green/yellow/red). Для онлайна выше — лучше, для доли
+# бесплатных — ниже лучше. Цена не имеет порога (ставится экспертно) и по
+# умолчанию считается «Хорошие показатели».
+_G, _O, _B = "Хорошие показатели", "Удовлетворительные показатели", "Неудовлетворительные показатели"
+
+
+def _grade_by_value(param: str, v: float) -> str:
+    if param == PARAM_ONLINE:      # ≥85% — хорошо, 78–85% — удовл., ниже — неуд.
+        return _G if v >= 0.85 else _O if v >= 0.78 else _B
+    if param == PARAM_FREE:        # ≤11% — хорошо, 11–20% — удовл., выше — неуд.
+        return _G if v <= 0.11 else _O if v <= 0.20 else _B
+    return ""
+
 # Библиотека советных частей рекомендаций (динамику и место считаем отдельно).
 # Выбор — строго по градации клуба (good/ok/bad); default — если градации нет.
 # Формулировки взяты из справок прошлого сезона по разным клубам.
@@ -292,14 +306,24 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
     if kind == "commission" and not (isinstance(cur, (int, float)) and 0 < cur <= 1):
         cur = None
 
-    # место и градация
-    place = None
+    # место (для текста по цене — фактический ранг по значению)
+    place = _place(better, league_all, club, cur) if (kind == "money" and league_all) else None
+
+    # градация: онлайн/бесплатные — по порогам из разметки прошлого сезона;
+    # цена — экспертно (по умолчанию «Хорошие», правится вручную); отклонение —
+    # из мониторинга (1/2/3); комиссия — по месту (ниже комиссия — лучше).
     grade_label = ""
-    if kind in ("share", "money", "commission") and league_all:
-        pv = 0 if (kind == "commission" and not cur) else cur
-        place = _place(better, league_all, club, pv)
-        if place:
-            grade_label = GRADES[_grade_by_place(place, len(league_all))]
+    if param in (PARAM_ONLINE, PARAM_FREE) and cur is not None:
+        grade_label = _grade_by_value(param, cur)
+    elif param == PARAM_PRICE and cur is not None:
+        grade_label = _G
+    elif kind == "commission":
+        if not cur:               # не работает с агентами — благоприятно (нет издержек)
+            grade_label = _G
+        elif league_all:
+            pl = _place("asc", league_all, club, cur)
+            if pl:
+                grade_label = GRADES[_grade_by_place(pl, len(league_all))]
     elif kind == "grade" and cur is not None:
         if cur >= 1:  # градация из мониторинга (1/2/3)
             grade_label = GRADES.get(int(round(cur)), "")
