@@ -329,10 +329,11 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
             if pl:
                 grade_label = GRADES[_grade_by_place(pl, len(league_all))]
     elif kind == "grade" and cur is not None:
-        if cur >= 1:  # градация из мониторинга (1/2/3)
-            grade_label = GRADES.get(int(round(cur)), "")
-        else:         # доля из билетного файла: меньше — лучше
-            grade_label = GRADES[3 if cur <= 0.02 else (2 if cur <= 0.05 else 1)]
+        if isinstance(cur, int) and not isinstance(cur, bool) and cur in (1, 2, 3):
+            grade_label = GRADES[cur]                # готовая градация из мониторинга
+        else:                                        # |отклонение| из билетов: 0/мало — лучше
+            d = abs(cur)
+            grade_label = GRADES[3 if d <= 0.02 else (2 if d <= 0.05 else 1)]
 
     dyn = ""  # предложение о динамике (считаем сами)
     if kind == "share" and param == PARAM_ONLINE:
@@ -382,14 +383,15 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         if avg_pos is not None:
             char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
     else:  # grade — отклонение протоколов
+        dev_code = isinstance(cur, int) and not isinstance(cur, bool) and cur in (1, 2, 3)
         if cur is None:
             char = "Данные для оценки отклонения от официальных протоколов не предоставлены."
-        elif cur >= 1:
+        elif dev_code:  # готовая градация 1/2/3 из мониторинга
             char = ("По итогам мониторинга данные по реализованным билетам и абонементам "
-                    f"отнесены к категории «{GRADES.get(int(round(cur)), '—').lower()}».")
-        else:
-            char = ("Предоставленные данные по реализованным билетам и абонементам имеют "
-                    f"отклонение от заявленной официальной посещаемости на {_pct(cur)}.")
+                    f"отнесены к категории «{GRADES.get(cur, '—').lower()}».")
+        else:           # доля-отклонение из билетов: показываем модуль
+            char = ("Предоставленные данные по реализованным билетам и абонементам отклоняются "
+                    f"от заявленной официальной посещаемости на {_pct(abs(cur))}.")
 
     # рекомендация: динамика → (для цены) регион → советная часть по градации
     parts = [dyn]

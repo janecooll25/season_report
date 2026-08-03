@@ -57,6 +57,21 @@ def test_grade_thresholds_match_monitoring_colors():
     assert _grade_by_value(PARAM_FREE, 0.36) == "Неудовлетворительные показатели"
 
 
+def test_deviation_graded_by_magnitude():
+    from yandex_report.club_report import PARAM_DEV, _describe
+    g = lambda cur: _describe(PARAM_DEV, "grade", "asc", cur, None, {}, "X")[2]
+    # доля-отклонение из билетов: по модулю, знак не важен
+    assert g(0.0) == "Хорошие показатели"
+    assert g(0.01) == "Хорошие показатели"
+    assert g(-0.01) == "Хорошие показатели"       # отрицательное — по модулю
+    assert g(0.03) == "Удовлетворительные показатели"
+    assert g(0.10) == "Неудовлетворительные показатели"
+    assert g(-0.10) == "Неудовлетворительные показатели"
+    # готовая градация 1/2/3 из мониторинга — как есть
+    assert g(3) == "Хорошие показатели"
+    assert g(1) == "Неудовлетворительные показатели"
+
+
 def test_list_clubs():
     assert list_clubs(_make_monitoring()) == ["Альфа", "Бета", "Гамма"]
 
