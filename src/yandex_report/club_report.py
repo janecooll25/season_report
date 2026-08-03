@@ -119,9 +119,11 @@ REC_LIBRARY: dict[str, dict[str, str]] = {
                  "счёт постепенного повышения средней цены разовых билетов и абонементов, соблюдая "
                  "баланс между ценой, покупательской способностью населения и интересом к каждому "
                  "конкретному матчу."),
-        "ok": ("Клубу рекомендуется соблюдать баланс между средней ценой билетов, покупательской "
-               "способностью населения и интересом к каждому конкретному матчу, постепенно повышая "
-               "доходы билетной программы."),
+        "ok": ("Учитывая невысокую заполняемость Спортсооружения, можно рассмотреть снижение "
+               "средней стоимости билета, что может повлечь за собой увеличение общего количества "
+               "реализованных билетов. При этом необходимо соблюдать баланс между средней ценой "
+               "билетов, покупательской способностью населения и его интересом к каждому "
+               "конкретному матчу."),
         "bad": ("Клубу рекомендуется пересмотреть ценовую политику с учётом покупательской "
                 "способности населения региона и заполняемости Спортсооружения."),
         "default": ("Клубу рекомендуется соблюдать баланс между средней ценой билетов, "
@@ -292,7 +294,7 @@ def _place(better: str, league_all: dict[str, float], club: str, cur) -> int | N
 
 
 def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[str, float],
-              club: str, region_note: str = "") -> tuple[str, str, str]:
+              club: str, region_note: str = "", fill: float | None = None) -> tuple[str, str, str]:
     """Возвращает (характеристика, рекомендации, подпись-градация).
 
     Рекомендация = посчитанная динамика + (для цены) справка по региону +
@@ -315,7 +317,10 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
     if param in (PARAM_ONLINE, PARAM_FREE) and cur is not None:
         grade_label = _grade_by_value(param, cur)
     elif param == PARAM_PRICE and cur is not None:
-        grade_label = _G
+        # цена: при низкой заполняемости арены (<70%) — «удовлетворительно»
+        # (стоит рассмотреть снижение цены), иначе — «хорошо». Если заполняемость
+        # неизвестна — по умолчанию «хорошо» (правится вручную).
+        grade_label = _O if (fill is not None and fill < 0.70) else _G
     elif kind == "commission":
         if not cur:               # не работает с агентами — благоприятно (нет издержек)
             grade_label = _G
@@ -557,9 +562,10 @@ def build_club_report(
                           if isinstance(m.get("commission"), (int, float))
                           and 0 < m["commission"] <= 1}
 
+        fill = metrics.get("fill_reg") if (metrics and param == PARAM_PRICE) else None
         char, rec, grade_label = _describe(
             param, kind, better, cur, prev, league_all, club,
-            region_note=region_note if param == PARAM_PRICE else "")
+            region_note=region_note if param == PARAM_PRICE else "", fill=fill)
         char_fill = GRADE_FILL.get(grade_label, FILL_WHITE)
         _add_row((DIRECTION_TICKET, param, char, rec or "Рекомендации отсутствуют."),
                  sizes=10, bolds=False, fills=(None, FILL_WHITE, char_fill, None))
