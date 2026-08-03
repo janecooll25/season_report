@@ -256,9 +256,11 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
             rec = "Рекомендации отсутствуют."
 
     elif kind == "commission":
-        pos = [v for v in vals if v > 0]           # среднее по клубам, работающим с агентами
+        pos = [v for v in vals if 0 < v <= 1]      # среднее по работающим с агентами
         avg_pos = sum(pos) / len(pos) if pos else None
-        if cur is None or cur == 0:
+        if not (isinstance(cur, (int, float)) and 0 < cur <= 1):
+            cur = None
+        if cur is None:
             char = "Клуб не работает с агентами для реализации билетов."
         else:
             char = (f"Размер агентской комиссии по договорам на реализацию билетов "
@@ -454,9 +456,11 @@ def build_club_report(
             if li is not None:
                 league_all = _column_values(ws, rows, col_start, li)
         elif kind == "commission" and agg_clubs:
-            # средняя комиссия по Лиге — из агрегата (все клубы)
+            # средняя комиссия по Лиге — из агрегата; берём только правдоподобные
+            # значения (доля 0..1, т.е. 0–100 %), отсеивая ошибочные выбросы
             league_all = {c: m["commission"] for c, m in agg_clubs.items()
-                          if isinstance(m.get("commission"), (int, float))}
+                          if isinstance(m.get("commission"), (int, float))
+                          and 0 < m["commission"] <= 1}
 
         char, rec, grade_label = _describe(
             param, kind, better, cur, prev, league_all, club,
