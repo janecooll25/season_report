@@ -102,6 +102,14 @@ PARAMS: list[tuple[str, str, str, str, bool]] = [
     ("deviation", "Фактическое отклонение посещаемости", "%", "asc", True),
 ]
 
+# Параметры, ранжируемые по модулю (ближе к нулю — лучше), а показываемые со
+# знаком. Отклонение: «+» протокол больше билетов, «−» меньше.
+MAGNITUDE_KEYS = {"deviation"}
+
+
+def _rank_key(key: str):
+    return (lambda v: abs(v)) if key in MAGNITUDE_KEYS else (lambda v: v)
+
 
 AGG_SHEET = "Средние по клубам"
 
@@ -209,9 +217,11 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None,
     price_season = income_paid / paid_single if paid_single else None
     abon_price = income_abon / abon_paid if abon_paid else None
 
-    # Фактическое отклонение посещаемости: |протокол (M=13) − билеты| / билеты.
+    # Фактическое отклонение посещаемости: (протокол (M=13) − билеты) / билеты.
+    # Со знаком: «+» — протокол больше билетов, «−» — меньше. Для места/градации
+    # берётся модуль (ближе к нулю — лучше), знак — только для отображения.
     protocol = _both(_sum_col, rz, 13, rz_reg, rz_po)
-    deviation = abs(protocol - att_season) / att_season if (protocol and att_season) else None
+    deviation = (protocol - att_season) / att_season if (protocol and att_season) else None
 
     # Каналы и комиссия.
     online = offline = 0.0
@@ -322,7 +332,8 @@ def _rank_param(clubs, key: str, direction: str):
     present = [(name, v) for name, v in pairs if isinstance(v, (int, float))]
     vals = [v for _, v in present]
     stats = (sum(vals) / len(vals), min(vals), max(vals)) if vals else (None, None, None)
-    ranked = sorted(present, key=lambda kv: kv[1], reverse=(direction == "desc"))
+    rk = _rank_key(key)
+    ranked = sorted(present, key=lambda kv: rk(kv[1]), reverse=(direction == "desc"))
     rows = [(i, name, v, _grade(i, len(ranked)))
             for i, (name, v) in enumerate(ranked, start=1)]
     rows += [(None, name, None, "нет данных")
@@ -330,11 +341,12 @@ def _rank_param(clubs, key: str, direction: str):
     return stats, rows
 
 
-def _fmt_val(v, unit: str, is_pct: bool) -> str:
+def _fmt_val(v, unit: str, is_pct: bool, signed: bool = False) -> str:
     if not isinstance(v, (int, float)):
         return "—"
     if is_pct:
-        return f"{v * 100:.1f}%"
+        s = f"{v * 100:.1f}%"
+        return f"+{s}" if signed and v > 0 else s   # знак «+» для положительных
     s = f"{v:,.0f}".replace(",", " ")
     return f"{s} ₽" if unit == "руб." else s
 
@@ -368,7 +380,8 @@ def aggregate_clubs(
 
     row = 4
     for key, label, unit, direction, is_pct in PARAMS:
-        fmt = "0.0%" if is_pct else "#,##0"
+        signed = key in MAGNITUDE_KEYS
+        fmt = ("+0.0%;-0.0%;0.0%" if signed else "0.0%") if is_pct else "#,##0"
         pairs = [(name, m.get(key)) for name, m in clubs]
         present = [(name, v) for name, v in pairs if isinstance(v, (int, float))]
         vals = [v for _, v in present]
@@ -402,8 +415,10 @@ def aggregate_clubs(
             hc.fill = _HDRFILL
         row += 1
 
-        # ранжирование: место по направлению (desc — больше лучше)
-        ranked = sorted(present, key=lambda kv: kv[1], reverse=(direction == "desc"))
+        # ранжирование: место по направлению (desc — больше лучше;
+        # отклонение — по модулю, ближе к нулю лучше)
+        rk = _rank_key(key)
+        ranked = sorted(present, key=lambda kv: rk(kv[1]), reverse=(direction == "desc"))
         rank_of = {name: i + 1 for i, (name, _) in enumerate(ranked)}
         for name, val in pairs:
             ws.cell(row, 1, name).font = _REG
@@ -453,15 +468,17 @@ def build_aggregate_docx(
     doc.add_paragraph(f"Клубов в выборке: {len(clubs)}")
 
     for key, label, unit, direction, is_pct in PARAMS:
+        signed = key in MAGNITUDE_KEYS
         doc.add_heading(label, level=1)
         (avg, mn, mx), rows = _rank_param(clubs, key, direction)
         if avg is not None:
-            better = "выше" if direction == "desc" else "ниже"
+            better = ("ближе к нулю" if signed
+                      else "выше значение" if direction == "desc" else "ниже значение")
             doc.add_paragraph(
-                f"Среднее по Лиге: {_fmt_val(avg, unit, is_pct)}; "
-                f"минимум: {_fmt_val(mn, unit, is_pct)}; "
-                f"максимум: {_fmt_val(mx, unit, is_pct)}. "
-                f"Место 1 — лучший показатель ({better} значение)."
+                f"Среднее по Лиге: {_fmt_val(avg, unit, is_pct, signed)}; "
+                f"минимум: {_fmt_val(mn, unit, is_pct, signed)}; "
+                f"максимум: {_fmt_val(mx, unit, is_pct, signed)}. "
+                f"Место 1 — лучший показатель ({better})."
             )
         else:
             doc.add_paragraph("Нет данных по параметру.")
@@ -478,7 +495,7 @@ def build_aggregate_docx(
             c = table.add_row().cells
             c[0].text = str(place) if place else "—"
             c[1].text = name
-            c[2].text = _fmt_val(v, unit, is_pct)
+            c[2].text = _fmt_val(v, unit, is_pct, signed)
             c[3].text = grade
 
     if errors:

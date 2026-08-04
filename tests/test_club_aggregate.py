@@ -88,6 +88,18 @@ def test_to_rub_scales_money_metrics_only():
     assert conv["online_share"] == base["online_share"]
 
 
+def test_deviation_signed_display_ranked_by_magnitude():
+    from yandex_report.club_aggregate import _fmt_val, _rank_param
+    # знак в отображении: «+» для завышения, «−» для занижения
+    assert _fmt_val(0.05, "%", True, signed=True) == "+5.0%"
+    assert _fmt_val(-0.02, "%", True, signed=True) == "-2.0%"
+    # место — по модулю: −2% ближе к нулю, чем +5% → 1-е место
+    clubs = [("A", {"deviation": 0.05}), ("B", {"deviation": -0.02})]
+    _stats, rows = _rank_param(clubs, "deviation", "asc")
+    by_place = {name: place for place, name, _v, _g in rows}
+    assert by_place["B"] == 1 and by_place["A"] == 2
+
+
 def test_too_many_files_raises():
     files = [(f"c{i}.xlsx", _make_raw()) for i in range(MAX_CLUBS + 1)]
     with pytest.raises(TicketError):
