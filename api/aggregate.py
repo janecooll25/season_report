@@ -52,13 +52,19 @@ class handler(BaseHTTPRequestHandler):
             capacity = None
         season = (payload.get("season") or "2025/2026").strip() or "2025/2026"
         fmt = (payload.get("format") or "docx").strip().lower()
+        try:
+            byn_to_rub = float(payload["byn_to_rub"]) if payload.get("byn_to_rub") else None
+        except (TypeError, ValueError):
+            byn_to_rub = None
 
         try:
             if fmt == "xlsx":
-                data = aggregate_clubs(files, capacity=capacity, season_label=season)
+                data = aggregate_clubs(files, capacity=capacity, season_label=season,
+                                       byn_to_rub=byn_to_rub)
                 filename, mime = "clubs_aggregate.xlsx", XLSX_MIME
             else:
-                data = build_aggregate_docx(files, capacity=capacity, season_label=season)
+                data = build_aggregate_docx(files, capacity=capacity, season_label=season,
+                                            byn_to_rub=byn_to_rub)
                 filename, mime = "clubs_aggregate.docx", DOCX_MIME
         except TicketError as exc:
             self._json(400, {"error": str(exc)})

@@ -304,8 +304,13 @@ def _grade(rank: int, n: int) -> str:
     return "Неудовлетворительные показатели"
 
 
+def _is_belarus(club: str) -> bool:
+    """Белорусский клуб (суммы в BYN): Динамо Минск."""
+    return "минск" in club.lower()
+
+
 def _compute_all(
-    files: list[tuple[str, bytes]], capacity: int | None
+    files: list[tuple[str, bytes]], capacity: int | None, byn_to_rub: float | None = None,
 ) -> tuple[list[tuple[str, dict]], list[str]]:
     if not files:
         raise TicketError("Не приложено ни одного файла.")
@@ -314,8 +319,11 @@ def _compute_all(
     clubs: list[tuple[str, dict]] = []
     errors: list[str] = []
     for name, data in files:
+        club = _club_name(name)
+        # белорусский клуб — деньги в BYN → переводим в рубли РФ по курсу
+        rate = byn_to_rub if (byn_to_rub and _is_belarus(club)) else 1.0
         try:
-            clubs.append((_club_name(name), compute_club_metrics(data, capacity)))
+            clubs.append((club, compute_club_metrics(data, capacity, to_rub=rate)))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {exc}")
     if not clubs:
@@ -353,16 +361,19 @@ def _fmt_val(v, unit: str, is_pct: bool, signed: bool = False) -> str:
 
 def aggregate_clubs(
     files: list[tuple[str, bytes]], capacity: int | None = None,
-    season_label: str = "2025/2026",
+    season_label: str = "2025/2026", byn_to_rub: float | None = None,
 ) -> bytes:
     """Книга «Средние по клубам»: по каждому параметру — среднее/мин/макс и
-    таблица клубов со значением, местом и градацией."""
+    таблица клубов со значением, местом и градацией.
+
+    byn_to_rub — курс белорусского рубля к RUB; применяется к клубу Динамо
+    Минск (его суммы в BYN → рубли РФ)."""
     if not files:
         raise TicketError("Не приложено ни одного файла.")
     if len(files) > MAX_CLUBS:
         raise TicketError(f"Слишком много файлов: {len(files)} (максимум {MAX_CLUBS}).")
 
-    clubs, errors = _compute_all(files, capacity)
+    clubs, errors = _compute_all(files, capacity, byn_to_rub)
     n = len(clubs)
 
     wb = openpyxl.Workbook()
@@ -451,14 +462,16 @@ def aggregate_clubs(
 
 def build_aggregate_docx(
     files: list[tuple[str, bytes]], capacity: int | None = None,
-    season_label: str = "2025/2026",
+    season_label: str = "2025/2026", byn_to_rub: float | None = None,
 ) -> bytes:
     """Общий документ (docx): по каждому из 4 параметров — среднее/мин/макс по
-    Лиге и таблица клубов, ранжированных по местам (1..N) с градацией."""
+    Лиге и таблица клубов, ранжированных по местам (1..N) с градацией.
+
+    byn_to_rub — курс BYN→RUB для клуба Динамо Минск (суммы в белорусских рублях)."""
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    clubs, errors = _compute_all(files, capacity)
+    clubs, errors = _compute_all(files, capacity, byn_to_rub)
 
     doc = Document()
     title = doc.add_heading(

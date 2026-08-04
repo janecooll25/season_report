@@ -100,6 +100,17 @@ def test_deviation_signed_display_ranked_by_magnitude():
     assert by_place["B"] == 1 and by_place["A"] == 2
 
 
+def test_byn_rate_applies_only_to_minsk():
+    from yandex_report.club_aggregate import parse_aggregate_clubs
+    files = [("Динамо Минск.xlsx", _make_raw()), ("Сибирь.xlsx", _make_raw())]
+    base = parse_aggregate_clubs(aggregate_clubs(files, capacity=200))
+    conv = parse_aggregate_clubs(aggregate_clubs(files, capacity=200, byn_to_rub=27.0))
+    # деньги Минска переведены по курсу, у Сибири — без изменений
+    assert conv["Динамо Минск"]["income_total"] == pytest.approx(
+        base["Динамо Минск"]["income_total"] * 27.0)
+    assert conv["Сибирь"]["income_total"] == base["Сибирь"]["income_total"]
+
+
 def test_too_many_files_raises():
     files = [(f"c{i}.xlsx", _make_raw()) for i in range(MAX_CLUBS + 1)]
     with pytest.raises(TicketError):

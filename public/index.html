@@ -136,6 +136,10 @@
           <option value="docx">Документ Word (.docx)</option>
           <option value="xlsx">Таблица Excel (.xlsx)</option>
         </select>
+        <label for="agg-byn">Курс BYN→RUB (для Динамо Минск)</label>
+        <input type="text" id="agg-byn" placeholder="напр. 26,9514" inputmode="decimal" />
+        <p class="hint">Суммы Динамо Минск в белорусских рублях — переведутся в рубли
+          РФ по этому курсу. Пусто — без пересчёта.</p>
       </div>
 
       <!-- Справка по клубу -->
@@ -432,7 +436,8 @@
             name: f.name, content_b64: await readBase64(f),
           })));
           const format = document.getElementById('agg-format').value;
-          const bodyStr = JSON.stringify({ files, season, format });
+          const byn_to_rub = document.getElementById('agg-byn').value.replace(',', '.').replace(/[^\d.]/g, '');
+          const bodyStr = JSON.stringify({ files, season, format, byn_to_rub });
           const gz = await gzipBody(bodyStr);
           const headers = { 'Content-Type': 'application/json' };
           let body = bodyStr;
