@@ -340,7 +340,8 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         cur_s = _pct(cur) if cur is not None else "нет данных"
         rel = ("выше" if cur is not None and avg is not None and cur >= avg else "ниже")
         char = (f"Клуб имеет долю продаж билетов через интернет в размере {cur_s}"
-                + (f", что {rel} среднего значения среди клубов КХЛ." if avg is not None else ".")
+                + (f", что {rel} среднего значения среди клубов КХЛ."
+                   if avg is not None and cur is not None else ".")
                 + (f" Средняя доля продаж билетов через интернет составляет {_pct(avg)}, "
                    f"минимальный показатель – {_pct(lo)}, максимальный показатель – {_pct(hi)}."
                    if avg is not None else ""))
@@ -544,25 +545,31 @@ def build_club_report(
     for col_start, param, kind, better in TICKET_PARAMS:
         cur_idx = _season_index(ws, col_start, season) if col_start else None
         prev_idx = _season_index(ws, col_start, prev_season) if col_start else None
-        cur = None
-        if col_start and cur_idx is not None:
+        # Текущее значение — из агрегата/билетного файла; из чек-листа только
+        # запасным вариантом. Прошлый сезон — всегда из чек-листа.
+        cur = metrics.get(METRIC_KEY.get(param)) if metrics is not None else None
+        if cur is None and col_start and cur_idx is not None:
             cur = _num(ws.cell(rows[club], col_start + cur_idx).value)
-        if cur is None and metrics is not None:
-            cur = metrics.get(METRIC_KEY.get(param))
         prev = (_num(ws.cell(rows[club], col_start + prev_idx).value)
                 if col_start and prev_idx is not None else None)
 
+        # Среднее/мин/макс и место по Лиге — из файла агрегата (все клубы,
+        # текущий сезон). Из чек-листа мониторинга Лига берётся только как
+        # запасной вариант, если агрегат не приложен.
         league_all = {}
-        if kind in ("share", "money") and col_start:
+        mkey = METRIC_KEY.get(param)
+        if agg_clubs and mkey and kind in ("share", "money", "commission"):
+            for c, m in agg_clubs.items():
+                v = m.get(mkey)
+                if not isinstance(v, (int, float)) or isinstance(v, bool):
+                    continue
+                if param == PARAM_COMMISSION and not (0 < v <= 1):
+                    continue  # отсекаем ошибочные выбросы комиссии
+                league_all[c] = v
+        elif kind in ("share", "money") and col_start:
             li = _latest_league_index(ws, rows, col_start, cur_idx)
             if li is not None:
                 league_all = _column_values(ws, rows, col_start, li)
-        elif kind == "commission" and agg_clubs:
-            # средняя комиссия по Лиге — из агрегата; берём только правдоподобные
-            # значения (доля 0..1, т.е. 0–100 %), отсеивая ошибочные выбросы
-            league_all = {c: m["commission"] for c, m in agg_clubs.items()
-                          if isinstance(m.get("commission"), (int, float))
-                          and 0 < m["commission"] <= 1}
 
         fill = metrics.get("fill_reg") if (metrics and param == PARAM_PRICE) else None
         char, rec, grade_label = _describe(
