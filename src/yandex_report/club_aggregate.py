@@ -305,8 +305,9 @@ def _grade(rank: int, n: int) -> str:
 
 
 def _is_belarus(club: str) -> bool:
-    """Белорусский клуб (суммы в BYN): Динамо Минск."""
-    return "минск" in club.lower()
+    """Белорусский клуб (суммы в BYN): Динамо Минск (рус./лат. написание)."""
+    c = club.lower()
+    return any(k in c for k in ("минск", "minsk", "динамо мн", "dinamo mn"))
 
 
 def _compute_all(
