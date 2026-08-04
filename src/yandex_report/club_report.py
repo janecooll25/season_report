@@ -294,7 +294,8 @@ def _place(better: str, league_all: dict[str, float], club: str, cur) -> int | N
 
 
 def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[str, float],
-              club: str, region_note: str = "", fill: float | None = None) -> tuple[str, str, str]:
+              club: str, region_note: str = "", fill: float | None = None,
+              commission_mode: str | None = None) -> tuple[str, str, str]:
     """Возвращает (характеристика, рекомендации, подпись-градация).
 
     Рекомендация = посчитанная динамика + (для цены) справка по региону +
@@ -322,8 +323,10 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         # неизвестна — по умолчанию «хорошо» (правится вручную).
         grade_label = _O if (fill is not None and fill < 0.70) else _G
     elif kind == "commission":
-        if not cur:               # не работает с агентами — благоприятно (нет издержек)
-            grade_label = _G
+        if commission_mode == "undisclosed":
+            grade_label = ""          # комиссия не раскрывается — не оцениваем
+        elif commission_mode == "none" or not cur:
+            grade_label = _G          # не работает с агентами — благоприятно (нет издержек)
         elif league_all:
             pl = _place("asc", league_all, club, cur)
             if pl:
@@ -376,13 +379,24 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
     elif kind == "commission":
         pos = [v for v in vals if 0 < v <= 1]      # среднее по работающим с агентами
         avg_pos = sum(pos) / len(pos) if pos else None
-        if cur is None:
+        if commission_mode == "none":
+            char = "Клуб не реализует билеты через агентов."
+            if avg_pos is not None:
+                char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
+        elif commission_mode == "undisclosed":
+            char = ("Клуб реализует билеты через агентов, однако не раскрывает размер "
+                    "агентской комиссии.")
+            if avg_pos is not None:
+                char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
+        elif cur is None:
             char = "Клуб не работает с агентами для реализации билетов."
+            if avg_pos is not None:
+                char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
         else:
             char = (f"Размер агентской комиссии по договорам на реализацию билетов "
                     f"составляет {_pct(cur)}.")
-        if avg_pos is not None:
-            char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
+            if avg_pos is not None:
+                char += f" Среднее значение по Лиге составляет {_pct(avg_pos)}."
     else:  # grade — отклонение протоколов
         dev_code = isinstance(cur, int) and not isinstance(cur, bool) and cur in (1, 2, 3)
         if cur is None:
@@ -409,9 +423,13 @@ def build_club_report(
     prev_season: str = "24/25", ticket_bytes: bytes | None = None,
     capacity: int | None = None, to_rub: float = 1.0,
     region_income_bytes: bytes | None = None, income_year: str = "2025",
-    aggregate_bytes: bytes | None = None,
+    aggregate_bytes: bytes | None = None, commission_mode: str | None = None,
 ) -> bytes:
     """docx-справка по билетной программе клуба за сезон.
+
+    commission_mode — формулировка по агентской комиссии: "none" (клуб не
+    реализует билеты через агентов), "undisclosed" (работает с агентами, но не
+    раскрывает комиссию) или None (считается из данных).
 
     Значения текущего сезона (в порядке приоритета): из колонки season файла
     мониторинга → из агрегированного файла клубов (aggregate_bytes) → из
@@ -574,7 +592,8 @@ def build_club_report(
         fill = metrics.get("fill_reg") if (metrics and param == PARAM_PRICE) else None
         char, rec, grade_label = _describe(
             param, kind, better, cur, prev, league_all, club,
-            region_note=region_note if param == PARAM_PRICE else "", fill=fill)
+            region_note=region_note if param == PARAM_PRICE else "", fill=fill,
+            commission_mode=commission_mode if param == PARAM_COMMISSION else None)
         char_fill = GRADE_FILL.get(grade_label, FILL_WHITE)
         _add_row((DIRECTION_TICKET, param, char, rec or "Рекомендации отсутствуют."),
                  sizes=10, bolds=False, fills=(None, FILL_WHITE, char_fill, None))

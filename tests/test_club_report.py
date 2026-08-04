@@ -72,6 +72,20 @@ def test_deviation_graded_by_magnitude():
     assert g(1) == "Неудовлетворительные показатели"
 
 
+def test_commission_mode_wordings():
+    from yandex_report.club_report import PARAM_COMMISSION, _describe
+    # 1) не реализует через агентов → благоприятно (зелёный)
+    char, _rec, grade = _describe(PARAM_COMMISSION, "commission", "asc", None, None, {},
+                                  "X", commission_mode="none")
+    assert "не реализует билеты через агентов" in char.lower()
+    assert grade == "Хорошие показатели"
+    # 2) не раскрывает комиссию → без градации (нельзя оценить)
+    char2, _r2, grade2 = _describe(PARAM_COMMISSION, "commission", "asc", None, None, {},
+                                   "X", commission_mode="undisclosed")
+    assert "не раскрывает размер" in char2.lower()
+    assert grade2 == ""
+
+
 def test_list_clubs():
     assert list_clubs(_make_monitoring()) == ["Альфа", "Бета", "Гамма"]
 

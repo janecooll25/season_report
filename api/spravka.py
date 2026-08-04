@@ -74,6 +74,9 @@ class handler(BaseHTTPRequestHandler):
 
         capacity = _num("capacity")
         to_rub = _num("to_rub") or 1.0
+        commission_mode = (payload.get("commission_mode") or "").strip() or None
+        if commission_mode not in ("none", "undisclosed", None):
+            commission_mode = None
 
         try:
             data = build_club_report(
@@ -82,6 +85,7 @@ class handler(BaseHTTPRequestHandler):
                 ticket_bytes=_b64(payload, "ticket_b64"),
                 capacity=int(capacity) if capacity else None, to_rub=to_rub,
                 region_income_bytes=_b64(payload, "income_b64"), income_year=income_year,
+                commission_mode=commission_mode,
             )
         except TicketError as exc:
             self._json(400, {"error": str(exc)})

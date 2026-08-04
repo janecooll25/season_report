@@ -170,6 +170,17 @@
           доля онлайн, средняя цена, доля бесплатных и агентская комиссия — по
           выбранному клубу, если в мониторинге они ещё не заполнены.</p>
 
+        <label class="check">
+          <input type="checkbox" id="sp-comm-none" />
+          Клуб не реализует билеты через агентов
+        </label>
+        <label class="check">
+          <input type="checkbox" id="sp-comm-undisclosed" />
+          Клуб не может разглашать размер комиссии
+        </label>
+        <p class="hint">Готовая формулировка по агентской комиссии. Если не отмечено —
+          размер комиссии берётся из данных.</p>
+
         <label for="sp-income">Файл доходов регионов Росстата (xlsx, необязательно)</label>
         <input type="file" id="sp-income" accept=".xlsx" />
         <div class="row">
@@ -418,6 +429,8 @@
             prev_season: document.getElementById('sp-prev').value.trim() || '24/25',
             income_year: document.getElementById('sp-year').value.trim() || '2025',
           };
+          if (document.getElementById('sp-comm-none').checked) body.commission_mode = 'none';
+          else if (document.getElementById('sp-comm-undisclosed').checked) body.commission_mode = 'undisclosed';
           const agg = document.getElementById('sp-agg');
           if (agg.files.length) body.aggregate_b64 = await readBase64(agg.files[0]);
           const income = document.getElementById('sp-income');
