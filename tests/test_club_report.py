@@ -86,6 +86,15 @@ def test_commission_mode_wordings():
     assert grade2 == ""
 
 
+def test_agg_lookup_matches_dynamo_name_variants():
+    from yandex_report.club_report import _agg_lookup
+    agg = {"Динамо М": {"online_share": 0.99}, "Динамо Мн": {"online_share": 0.77}}
+    # чек-лист называет клубы полнее — сопоставляем по нормализованному имени
+    assert _agg_lookup(agg, "Динамо Москва")["online_share"] == 0.99
+    assert _agg_lookup(agg, "Динамо Минск")["online_share"] == 0.77
+    assert _agg_lookup(agg, "Сибирь") == {}
+
+
 def test_list_clubs():
     assert list_clubs(_make_monitoring()) == ["Альфа", "Бета", "Гамма"]
 

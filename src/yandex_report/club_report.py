@@ -280,12 +280,32 @@ def _grade_by_place(place: int, n: int) -> int:
     return 1
 
 
+# ── сопоставление названий клубов (чек-лист ↔ агрегат) ──────────────────────
+# В чек-листе — «Динамо Москва»/«Динамо Минск», в агрегате — «Динамо М»/«Динамо Мн».
+def _norm_club(name: str) -> str:
+    n = " ".join(str(name).lower().split())
+    return n.replace("динамо москва", "динамо м").replace("динамо минск", "динамо мн")
+
+
+def _agg_lookup(agg_clubs: dict, club: str) -> dict:
+    """Значения клуба из агрегата с учётом разных написаний названия."""
+    if club in agg_clubs:
+        return agg_clubs[club]
+    target = _norm_club(club)
+    for k, v in agg_clubs.items():
+        if _norm_club(k) == target:
+            return v
+    return {}
+
+
 # ── сборка текста по параметру ──────────────────────────────────────────────
 def _place(better: str, league_all: dict[str, float], club: str, cur) -> int | None:
     if cur is None:
         return None
-    pool = dict(league_all)
-    pool[club] = cur  # клуб оценивается своим текущим значением
+    # убираем запись самого клуба (в любом написании), добавляем его текущее значение
+    target = _norm_club(club)
+    pool = {k: v for k, v in league_all.items() if _norm_club(k) != target}
+    pool[club] = cur
     ranked = sorted(pool.items(), key=lambda kv: kv[1], reverse=(better == "desc"))
     for i, (name, _) in enumerate(ranked, start=1):
         if name == club:
@@ -456,7 +476,7 @@ def build_club_report(
     agg_clubs: dict = {}      # значения всех клубов (для средней комиссии по Лиге)
     if aggregate_bytes is not None:
         agg_clubs = parse_aggregate_clubs(aggregate_bytes)
-        metrics = agg_clubs.get(club, {})
+        metrics = _agg_lookup(agg_clubs, club)   # учёт «Динамо Москва» ↔ «Динамо М»
     elif ticket_bytes is not None:
         metrics = compute_club_metrics(ticket_bytes, capacity=capacity, to_rub=to_rub)
 
