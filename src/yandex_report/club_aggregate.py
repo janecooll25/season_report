@@ -354,9 +354,9 @@ def _fmt_val(v, unit: str, is_pct: bool, signed: bool = False) -> str:
     if not isinstance(v, (int, float)):
         return "—"
     if is_pct:
-        s = f"{v * 100:.1f}%"
+        s = f"{v * 100:.0f}%"                        # целые проценты
         return f"+{s}" if signed and v > 0 else s   # знак «+» для положительных
-    s = f"{v:,.0f}".replace(",", " ")
+    s = f"{v:,.0f}".replace(",", " ")               # целые рубли
     return f"{s} ₽" if unit == "руб." else s
 
 
@@ -390,10 +390,13 @@ def aggregate_clubs(
     ws["A2"] = f"Клубов в выборке: {n}"
     ws["A2"].font = _REG
 
+    def _rnd(v):  # округляем всё до целого: проценты — до целого %, деньги — до рубля
+        return round(v, 2) if is_pct else round(v)
+
     row = 4
     for key, label, unit, direction, is_pct in PARAMS:
         signed = key in MAGNITUDE_KEYS
-        fmt = ("+0.0%;-0.0%;0.0%" if signed else "0.0%") if is_pct else "#,##0"
+        fmt = ("+0%;-0%;0%" if signed else "0%") if is_pct else "#,##0"
         pairs = [(name, m.get(key)) for name, m in clubs]
         present = [(name, v) for name, v in pairs if isinstance(v, (int, float))]
         vals = [v for _, v in present]
@@ -412,7 +415,7 @@ def aggregate_clubs(
                 ("Среднее по Лиге", avg), ("Минимум", min(vals)), ("Максимум", max(vals)),
             )):
                 ws.cell(row + j, 1, lbl).font = _REG
-                c = ws.cell(row + j, 2, round(val, 4))
+                c = ws.cell(row + j, 2, _rnd(val))
                 c.font = _HDR
                 c.number_format = fmt
             row += 3
@@ -435,7 +438,7 @@ def aggregate_clubs(
         for name, val in pairs:
             ws.cell(row, 1, name).font = _REG
             if isinstance(val, (int, float)):
-                c = ws.cell(row, 2, round(val, 4))
+                c = ws.cell(row, 2, _rnd(val))
                 c.number_format = fmt
                 c.font = _REG
                 rk = rank_of[name]

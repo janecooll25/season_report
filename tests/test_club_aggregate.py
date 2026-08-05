@@ -91,8 +91,8 @@ def test_to_rub_scales_money_metrics_only():
 def test_deviation_signed_display_ranked_by_magnitude():
     from yandex_report.club_aggregate import _fmt_val, _rank_param
     # знак в отображении: «+» для завышения, «−» для занижения
-    assert _fmt_val(0.05, "%", True, signed=True) == "+5.0%"
-    assert _fmt_val(-0.02, "%", True, signed=True) == "-2.0%"
+    assert _fmt_val(0.05, "%", True, signed=True) == "+5%"
+    assert _fmt_val(-0.02, "%", True, signed=True) == "-2%"
     # место — по модулю: −2% ближе к нулю, чем +5% → 1-е место
     clubs = [("A", {"deviation": 0.05}), ("B", {"deviation": -0.02})]
     _stats, rows = _rank_param(clubs, "deviation", "asc")
