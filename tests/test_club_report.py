@@ -57,6 +57,17 @@ def test_grade_thresholds_match_monitoring_colors():
     assert _grade_by_value(PARAM_FREE, 0.36) == "Неудовлетворительные показатели"
 
 
+def test_deviation_oversold_recommends_reselling_seat():
+    from yandex_report.club_report import PARAM_DEV, _describe
+    # продали больше, чем пришло (d<0): совет про реализацию места абонемента
+    char, rec, _g = _describe(PARAM_DEV, "grade", "asc", -0.05, None, {}, "X")
+    assert "больше билетов" in char.lower()
+    assert "реализации места владельца абонемента" in rec.lower()
+    # по протоколу пришло больше (d>0): без этого совета (юр. абзац)
+    char2, rec2, _g2 = _describe(PARAM_DEV, "grade", "asc", 0.05, None, {}, "X")
+    assert "реализации места владельца абонемента" not in rec2.lower()
+
+
 def test_deviation_graded_by_magnitude():
     from yandex_report.club_report import PARAM_DEV, _describe
     g = lambda cur: _describe(PARAM_DEV, "grade", "asc", cur, None, {}, "X")[2]
