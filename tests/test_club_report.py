@@ -72,6 +72,21 @@ def test_deviation_graded_by_magnitude():
     assert g(1) == "Неудовлетворительные показатели"
 
 
+def test_price_high_occupancy_from_90pct():
+    from yandex_report.club_report import PARAM_PRICE, _describe
+    lg = {"A": 900, "B": 700}
+    # 68% — не «стабильно высокая»: удовлетворительно + совет снизить цену
+    _c, rec, grade = _describe(PARAM_PRICE, "money", "desc", 800, 750, lg, "X", fill=0.68)
+    assert grade == "Удовлетворительные показатели"
+    assert "стабильно высок" not in rec.lower() and "68%" in rec
+    # 93% — стабильно высокая: хорошо
+    _c2, rec2, grade2 = _describe(PARAM_PRICE, "money", "desc", 800, 750, lg, "X", fill=0.93)
+    assert grade2 == "Хорошие показатели" and "стабильно высок" in rec2.lower()
+    # заполняемость неизвестна — не заявляем высокую
+    _c3, rec3, grade3 = _describe(PARAM_PRICE, "money", "desc", 800, 750, lg, "X", fill=None)
+    assert "стабильно высок" not in rec3.lower()
+
+
 def test_commission_mode_wordings():
     from yandex_report.club_report import PARAM_COMMISSION, _describe
     # 1) не реализует через агентов → благоприятно (зелёный)

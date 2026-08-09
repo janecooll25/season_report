@@ -365,10 +365,10 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
     if param in (PARAM_ONLINE, PARAM_FREE) and cur is not None:
         grade_label = _grade_by_value(param, cur)
     elif param == PARAM_PRICE and cur is not None:
-        # цена: при низкой заполняемости арены (<70%) — «удовлетворительно»
-        # (стоит рассмотреть снижение цены), иначе — «хорошо». Если заполняемость
+        # цена: «стабильно высокая» заполняемость — от 90%. Ниже 90% (известно) —
+        # «удовлетворительно» (рассмотреть снижение цены). Если заполняемость
         # неизвестна — по умолчанию «хорошо» (правится вручную).
-        grade_label = _O if (fill is not None and fill < 0.70) else _G
+        grade_label = _O if (fill is not None and fill < 0.90) else _G
     elif kind == "commission":
         if commission_mode == "undisclosed":
             grade_label = ""          # комиссия не раскрывается — не оцениваем
@@ -455,11 +455,32 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
             char = ("Предоставленные данные по реализованным билетам и абонементам отклоняются "
                     f"от заявленной официальной посещаемости на {_pct(abs(cur))}.")
 
-    # рекомендация: динамика → (для цены) регион → советная часть по градации
+    # советная часть: для цены зависит от заполняемости арены (высокая — от 90%),
+    # чтобы не заявлять «стабильно высокую заполняемость» там, где её нет.
+    if param == PARAM_PRICE:
+        if fill is not None and fill >= 0.90:
+            advisory = (f"Учитывая стабильно высокую заполняемость Спортсооружения "
+                        f"({_pct(fill)}), средняя цена билетов представляется выбранной верно. "
+                        "Клуб может повысить доходы билетной программы за счёт постепенного "
+                        "повышения средней цены разовых билетов и абонементов, соблюдая баланс "
+                        "между ценой, покупательской способностью населения и интересом к "
+                        "каждому конкретному матчу.")
+        elif fill is not None:
+            advisory = (f"Заполняемость Спортсооружения в прошедшем сезоне составила {_pct(fill)}. "
+                        "Клубу можно рассмотреть снижение средней стоимости билета, что может "
+                        "повлечь за собой увеличение общего количества реализованных билетов, "
+                        "соблюдая баланс между ценой, покупательской способностью населения и "
+                        "интересом к каждому конкретному матчу.")
+        else:
+            advisory = REC_LIBRARY[PARAM_PRICE]["default"]
+    else:
+        advisory = _advisory(param, grade_label)
+
+    # рекомендация: динамика → (для цены) регион → советная часть
     parts = [dyn]
     if param == PARAM_PRICE and region_note:
         parts.append(region_note)
-    parts.append(_advisory(param, grade_label))
+    parts.append(advisory)
     rec = _tidy(" ".join(p for p in parts if p)) or "Рекомендации отсутствуют."
     return _tidy(char), rec, grade_label
 
