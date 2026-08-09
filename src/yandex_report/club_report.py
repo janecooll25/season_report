@@ -388,9 +388,12 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
     elif kind == "grade" and cur is not None:
         if isinstance(cur, int) and not isinstance(cur, bool) and cur in (1, 2, 3):
             grade_label = GRADES[cur]                # готовая градация из мониторинга
-        else:                                        # |отклонение| из билетов: 0/мало — лучше
-            d = abs(cur)
-            grade_label = GRADES[3 if d <= 0.02 else (2 if d <= 0.05 else 1)]
+        elif abs(cur) < 0.005:                       # ≈0 — точное совпадение, маловероятно
+            grade_label = _O
+        elif cur > 0:                                # протокол превышает билеты — плохо
+            grade_label = _B
+        else:                                        # продали больше (пустые места) — приемлемо
+            grade_label = _G
 
     dyn = ""  # предложение о динамике (считаем сами)
     if kind == "share" and param == PARAM_ONLINE:
@@ -458,15 +461,15 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         elif dev_code:  # готовая градация 1/2/3 из мониторинга
             char = ("По итогам мониторинга данные по реализованным билетам и абонементам "
                     f"отнесены к категории «{GRADES.get(cur, '—').lower()}».")
-        elif cur < 0:   # продали больше билетов, чем пришло по протоколу
-            char = ("Реализовано больше билетов, чем зафиксировано в официальных протоколах "
-                    f"матчей: отклонение составляет {_pct(abs(cur))}.")
+        elif abs(cur) < 0.005:  # ≈0 — точное совпадение
+            char = ("Данные по реализованным билетам совпадают с заявленной официальной "
+                    "посещаемостью матчей.")
         elif cur > 0:   # по протоколу пришло больше, чем реализовано билетов
             char = ("Официальная посещаемость по протоколам превышает количество реализованных "
                     f"билетов на {_pct(abs(cur))}.")
-        else:
-            char = ("Данные по реализованным билетам совпадают с заявленной официальной "
-                    "посещаемостью.")
+        else:           # продали больше билетов, чем пришло по протоколу
+            char = ("Реализовано больше билетов, чем зафиксировано в официальных протоколах "
+                    f"матчей: отклонение составляет {_pct(abs(cur))}.")
 
     # советная часть: для цены зависит от заполняемости арены (высокая — от 90%),
     # чтобы не заявлять «стабильно высокую заполняемость» там, где её нет.
@@ -487,9 +490,13 @@ def _describe(param: str, kind: str, better: str, cur, prev, league_all: dict[st
         else:
             advisory = REC_LIBRARY[PARAM_PRICE]["default"]
     elif (param == PARAM_DEV and isinstance(cur, (int, float))
-          and not (isinstance(cur, int) and cur in (1, 2, 3)) and cur < 0):
-        # продали больше билетов, чем пришло по протоколу → реализация места абонемента
-        advisory = REC_LIBRARY[PARAM_DEV]["oversold"]
+          and not (isinstance(cur, int) and cur in (1, 2, 3))):
+        if abs(cur) < 0.005:       # ≈0 — точное совпадение маловероятно
+            advisory = REC_LIBRARY[PARAM_DEV]["good"]
+        elif cur > 0:              # протокол превышает билеты — неверные данные
+            advisory = REC_LIBRARY[PARAM_DEV]["bad"]
+        else:                      # продали больше → реализация места абонемента (пустые места)
+            advisory = REC_LIBRARY[PARAM_DEV]["oversold"]
     else:
         advisory = _advisory(param, grade_label)
 
