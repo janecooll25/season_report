@@ -282,9 +282,18 @@ def _grade_by_place(place: int, n: int) -> int:
 
 # ── сопоставление названий клубов (чек-лист ↔ агрегат) ──────────────────────
 # В чек-листе — «Динамо Москва»/«Динамо Минск», в агрегате — «Динамо М»/«Динамо Мн».
+# «Шанхайские Драконы» — переименованный «Куньлунь Ред Стар» (один клуб): их
+# история в чек-листе ведётся под старым названием.
+_CLUB_ALIASES = {
+    "динамо москва": "динамо м",
+    "динамо минск": "динамо мн",
+    "шанхайские драконы": "куньлунь ред стар",
+}
+
+
 def _norm_club(name: str) -> str:
     n = " ".join(str(name).lower().split())
-    return n.replace("динамо москва", "динамо м").replace("динамо минск", "динамо мн")
+    return _CLUB_ALIASES.get(n, n)
 
 
 def _agg_lookup(agg_clubs: dict, club: str) -> dict:
@@ -296,6 +305,24 @@ def _agg_lookup(agg_clubs: dict, club: str) -> dict:
         if _norm_club(k) == target:
             return v
     return {}
+
+
+def _monitor_row(ws, rows: dict[str, int], club: str) -> int | None:
+    """Строка клуба в чек-листе с учётом алиасов. Если под одним названием
+    несколько строк (напр. «Куньлунь Ред Стар» и «Шанхайские Драконы») — берём
+    ту, где больше заполненных данных (историю ведут под старым названием)."""
+    target = _norm_club(club)
+    matches = [r for name, r in rows.items() if _norm_club(name) == target]
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+
+    def _filled(r: int) -> int:
+        return sum(1 for c in range(2, ws.max_column + 1)
+                   if _num(ws.cell(r, c).value) is not None)
+
+    return max(matches, key=_filled)
 
 
 # ── сборка текста по параметру ──────────────────────────────────────────────
@@ -466,7 +493,8 @@ def build_club_report(
     wb = openpyxl.load_workbook(BytesIO(monitoring_bytes), data_only=True)
     ws = _monitor_ws(wb)
     rows = _club_rows(ws)
-    if club not in rows:
+    club_row = _monitor_row(ws, rows, club)  # строка истории (с учётом алиасов)
+    if club_row is None:
         raise ReportError(f"Клуб «{club}» не найден в файле мониторинга. "
                           f"Доступны: {', '.join(sorted(rows))}.")
 
@@ -587,8 +615,8 @@ def build_club_report(
         # запасным вариантом. Прошлый сезон — всегда из чек-листа.
         cur = metrics.get(METRIC_KEY.get(param)) if metrics is not None else None
         if cur is None and col_start and cur_idx is not None:
-            cur = _num(ws.cell(rows[club], col_start + cur_idx).value)
-        prev = (_num(ws.cell(rows[club], col_start + prev_idx).value)
+            cur = _num(ws.cell(club_row, col_start + cur_idx).value)
+        prev = (_num(ws.cell(club_row, col_start + prev_idx).value)
                 if col_start and prev_idx is not None else None)
 
         # Среднее/мин/макс и место по Лиге — из файла агрегата (все клубы,

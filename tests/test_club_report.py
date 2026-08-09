@@ -86,6 +86,26 @@ def test_commission_mode_wordings():
     assert grade2 == ""
 
 
+def test_shanghai_uses_kunlun_history_row():
+    import openpyxl
+    from yandex_report.club_report import _club_rows, _monitor_row, _norm_club
+    # Шанхай = переименованный Куньлунь → одно нормализованное имя
+    assert _norm_club("Шанхайские Драконы") == _norm_club("Куньлунь Ред Стар")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Чек-лист мониторинг"
+    ws["A5"] = "Доля розничных продаж билетов через интернет"
+    for i, s in enumerate(SEASONS):
+        ws.cell(6, 10 + i, s)
+    ws["A7"] = "Куньлунь Ред Стар"
+    ws.cell(7, 10 + 6, 0.7)          # у Куньлуня есть история
+    ws["A8"] = "Шанхайские Драконы"  # новая строка без данных
+    ws["A9"] = "Характеристика"
+    rows = _club_rows(ws)
+    # для Шанхая берём строку Куньлуня (там данные), а не пустую свою
+    assert _monitor_row(ws, rows, "Шанхайские Драконы") == 7
+
+
 def test_agg_lookup_matches_dynamo_name_variants():
     from yandex_report.club_report import _agg_lookup
     agg = {"Динамо М": {"online_share": 0.99}, "Динамо Мн": {"online_share": 0.77}}
