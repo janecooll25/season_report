@@ -149,8 +149,8 @@ def parse_aggregate_clubs(agg_bytes: bytes) -> dict[str, dict[str, float]]:
     return result
 
 
-def _read_calc_fill(input_bytes: bytes) -> float | None:
-    """Готовая «Заполняемость арены (регулярка)» с листа «Расчеты» (кэш Excel)."""
+def _read_calc_capacity(input_bytes: bytes) -> float | None:
+    """Вместимость арены с листа «Расчеты» (строка «Вместимость арены»)."""
     try:
         wb = openpyxl.load_workbook(BytesIO(input_bytes), data_only=True, read_only=True)
     except Exception:  # noqa: BLE001
@@ -158,9 +158,9 @@ def _read_calc_fill(input_bytes: bytes) -> float | None:
     if "Расчеты" not in wb.sheetnames:
         return None
     for row in wb["Расчеты"].iter_rows(values_only=True):
-        if len(row) >= 3 and isinstance(row[1], str) and "заполняемост" in row[1].lower():
+        if len(row) >= 3 and isinstance(row[1], str) and "вместимост" in row[1].lower():
             v = row[2]
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v <= 1.5:
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
                 return float(v)
     return None
 
@@ -204,17 +204,17 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None,
     paid_base = att_season - abon_paid_active - abon_free_active
     free_share = free_total / paid_base if paid_base else None
 
-    cap = capacity or max(
+    cap = capacity or _read_calc_capacity(input_bytes) or max(
         (sum(_num(rz, r, c) for c in range(3, 11))
          for span in (rz_reg, rz_po) if span
          for r in range(span[0], span[1] + 1)),
         default=0,
     ) or None
-    # Заполняемость: сначала готовое значение с листа «Расчеты» (если файл
-    # пересчитан в Excel), иначе — считаем из посещаемости и вместимости.
-    calc_fill = _read_calc_fill(input_bytes)
-    fill_reg = calc_fill if calc_fill is not None else (
-        (att_reg / n_reg / cap) if (n_reg and cap) else None)
+    # Фактическая заполняемость — по протоколам (столбец M «Посещаемость по
+    # протоколу»), а не по реализованным билетам: средняя протокольная
+    # посещаемость регулярки / вместимость арены.
+    protocol_reg = _sum_col(rz, 13, rz_reg)
+    fill_reg = (protocol_reg / n_reg / cap) if (n_reg and cap and protocol_reg) else None
 
     # Доход. «Всего» — колонка C (3); если она формула без значения,
     # берём сумму компонент D..G (4..7).
