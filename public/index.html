@@ -170,6 +170,11 @@
           доля онлайн, средняя цена, доля бесплатных и агентская комиссия — по
           выбранному клубу, если в мониторинге они ещё не заполнены.</p>
 
+        <label for="sp-ticket">Билетный файл клуба (xlsx, необязательно)</label>
+        <input type="file" id="sp-ticket" accept=".xlsx" />
+        <p class="hint">Нужен для заполняемости арены (берётся с листа «Расчеты»):
+          цена красится и комментируется по правилу «стабильно высокая — от 90%».</p>
+
         <label class="check">
           <input type="checkbox" id="sp-comm-none" />
           Клуб не реализует билеты через агентов
@@ -433,6 +438,8 @@
           else if (document.getElementById('sp-comm-undisclosed').checked) body.commission_mode = 'undisclosed';
           const agg = document.getElementById('sp-agg');
           if (agg.files.length) body.aggregate_b64 = await readBase64(agg.files[0]);
+          const spTicket = document.getElementById('sp-ticket');
+          if (spTicket.files.length) body.ticket_b64 = await readBase64(spTicket.files[0]);
           const income = document.getElementById('sp-income');
           if (income.files.length) body.income_b64 = await readBase64(income.files[0]);
           const bodyStr = JSON.stringify(body);

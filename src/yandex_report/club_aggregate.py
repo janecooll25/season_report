@@ -148,6 +148,22 @@ def parse_aggregate_clubs(agg_bytes: bytes) -> dict[str, dict[str, float]]:
     return result
 
 
+def _read_calc_fill(input_bytes: bytes) -> float | None:
+    """Готовая «Заполняемость арены (регулярка)» с листа «Расчеты» (кэш Excel)."""
+    try:
+        wb = openpyxl.load_workbook(BytesIO(input_bytes), data_only=True, read_only=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if "Расчеты" not in wb.sheetnames:
+        return None
+    for row in wb["Расчеты"].iter_rows(values_only=True):
+        if len(row) >= 3 and isinstance(row[1], str) and "заполняемост" in row[1].lower():
+            v = row[2]
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v <= 1.5:
+                return float(v)
+    return None
+
+
 def compute_club_metrics(input_bytes: bytes, capacity: int | None = None,
                          to_rub: float = 1.0) -> dict[str, float | None]:
     """Числовые метрики одного клуба (без формул).
@@ -193,7 +209,11 @@ def compute_club_metrics(input_bytes: bytes, capacity: int | None = None,
          for r in range(span[0], span[1] + 1)),
         default=0,
     ) or None
-    fill_reg = (att_reg / n_reg / cap) if (n_reg and cap) else None
+    # Заполняемость: сначала готовое значение с листа «Расчеты» (если файл
+    # пересчитан в Excel), иначе — считаем из посещаемости и вместимости.
+    calc_fill = _read_calc_fill(input_bytes)
+    fill_reg = calc_fill if calc_fill is not None else (
+        (att_reg / n_reg / cap) if (n_reg and cap) else None)
 
     # Доход. «Всего» — колонка C (3); если она формула без значения,
     # берём сумму компонент D..G (4..7).

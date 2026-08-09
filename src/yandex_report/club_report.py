@@ -523,11 +523,16 @@ def build_club_report(
     # отдельного билетного файла клуба.
     metrics = None            # значения выбранного клуба
     agg_clubs: dict = {}      # значения всех клубов (для средней комиссии по Лиге)
+    ticket_metrics = None     # метрики из билетного файла клуба (в т.ч. заполняемость)
+    if ticket_bytes is not None:
+        ticket_metrics = compute_club_metrics(ticket_bytes, capacity=capacity, to_rub=to_rub)
     if aggregate_bytes is not None:
         agg_clubs = parse_aggregate_clubs(aggregate_bytes)
         metrics = _agg_lookup(agg_clubs, club)   # учёт «Динамо Москва» ↔ «Динамо М»
-    elif ticket_bytes is not None:
-        metrics = compute_club_metrics(ticket_bytes, capacity=capacity, to_rub=to_rub)
+    elif ticket_metrics is not None:
+        metrics = ticket_metrics
+    # заполняемость арены — из билетного файла клуба (лист «Расчеты»), если приложен
+    fill_reg = (ticket_metrics or metrics or {}).get("fill_reg")
 
     region_note = ""
     if region_income_bytes is not None:
@@ -658,7 +663,7 @@ def build_club_report(
             if li is not None:
                 league_all = _column_values(ws, rows, col_start, li)
 
-        fill = metrics.get("fill_reg") if (metrics and param == PARAM_PRICE) else None
+        fill = fill_reg if param == PARAM_PRICE else None
         char, rec, grade_label = _describe(
             param, kind, better, cur, prev, league_all, club,
             region_note=region_note if param == PARAM_PRICE else "", fill=fill,
