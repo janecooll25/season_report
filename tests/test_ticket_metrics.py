@@ -74,6 +74,19 @@ def test_section_spans_detects_playoff_without_game_numbers():
     assert ws["C22"].value == "=COUNT('Реализованные билеты'!K8:K8)"
 
 
+def test_section_spans_ignores_promo_playoff_row():
+    """Строка-примечание со словом «Плей-офф» не должна ломать границу секций."""
+    wb = openpyxl.load_workbook(BytesIO(_make_raw()))
+    dh = wb[DH]
+    # добавляем рекламную строку ниже данных, содержащую «Плей-офф»
+    dh.cell(20, 1, 'Карта привилегий "Подкова" (только Плей-офф)')
+    buf = BytesIO(); wb.save(buf)
+    reg, po = _section_spans(openpyxl.load_workbook(buf)[DH])
+    # регулярка не должна растягиваться до рекламной строки
+    assert reg == (4, 5)
+    assert po == (7, 7)
+
+
 def test_build_adds_calc_sheet_and_preserves_originals():
     out = build_calculations(_make_raw(), capacity=200, season_label="2025/2026")
     wb = openpyxl.load_workbook(BytesIO(out))

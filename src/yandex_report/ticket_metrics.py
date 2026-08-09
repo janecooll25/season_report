@@ -88,10 +88,12 @@ def _section_spans(ws) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
         a = row[0] if row else None
         if isinstance(a, str):
             u = a.strip().upper()
-            if "РЕГУЛЯРН" in u:
+            # только короткие строки-заголовки секций; берём ПЕРВОЕ вхождение —
+            # чтобы не спутать с примечаниями/акциями вроде «…(только Плей-офф)».
+            if reg_marker is None and "РЕГУЛЯРН" in u and len(u) <= 25:
                 reg_marker = i
                 continue
-            if "ПЛЕЙ" in u and "ОФФ" in u:
+            if po_marker is None and "ПЛЕЙ" in u and "ОФФ" in u and len(u) <= 25:
                 po_marker = i
                 continue
         if _is_data_row(row):
