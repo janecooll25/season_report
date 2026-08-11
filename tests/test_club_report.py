@@ -142,6 +142,33 @@ def test_agg_lookup_matches_dynamo_name_variants():
     assert _agg_lookup(agg, "Сибирь") == {}
 
 
+def test_fill_monitoring_writes_season_values_and_colors():
+    from yandex_report.club_aggregate import aggregate_clubs
+    from yandex_report.club_report import fill_monitoring
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Чек-лист мониторинг"
+    ws["B5"] = "Отклонение данных официальных протоколов"
+    ws["J5"] = "Доля розничных продаж билетов через интернет"
+    ws["R5"] = "Средняя цена коммерческой реализации билетов"
+    ws["Z5"] = "Процент билетов, распространяемых на безвозмездной основе"
+    for start in (2, 10, 18, 26):
+        for i, s in enumerate(SEASONS):
+            ws.cell(6, start + i, s)
+    ws.cell(7, 1, "Сибирь")
+    ws.cell(8, 1, "Характеристика")
+    buf = BytesIO(); wb.save(buf)
+
+    agg = aggregate_clubs([("Сибирь.xlsx", _make_raw())], capacity=200)
+    out = fill_monitoring(buf.getvalue(), agg)
+    ws2 = openpyxl.load_workbook(BytesIO(out))["Чек-лист мониторинг"]
+    # онлайн 25/26 (col 10+7=17) = 300/400 = 0.75, ячейка залита
+    assert round(ws2.cell(7, 17).value, 2) == 0.75
+    assert ws2.cell(7, 17).fill.patternType == "solid"
+    # цена 25/26 (col 25) заполнена числом
+    assert isinstance(ws2.cell(7, 25).value, (int, float))
+
+
 def test_list_clubs():
     assert list_clubs(_make_monitoring()) == ["Альфа", "Бета", "Гамма"]
 

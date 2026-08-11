@@ -757,3 +757,98 @@ def list_clubs(monitoring_bytes: bytes) -> list[str]:
     wb = openpyxl.load_workbook(BytesIO(monitoring_bytes), data_only=True, read_only=True)
     ws = _monitor_ws(wb)
     return list(_club_rows(ws))
+
+
+# ── заполнение чек-листа значениями сезона из агрегата ───────────────────────
+def _grade_fill():
+    """Заливки под градацию — как в цветном чек-листе (theme9/theme7/FF9999)."""
+    from openpyxl.styles import PatternFill
+    from openpyxl.styles.colors import Color
+    return {
+        _G: PatternFill("solid", fgColor=Color(theme=9, tint=0.6)),   # зелёный
+        _O: PatternFill("solid", fgColor=Color(theme=7, tint=0.6)),   # жёлтый
+        _B: PatternFill("solid", fgColor="FFFF9999"),                 # красный (ARGB)
+    }
+
+
+def _dev_grade_label(d: float) -> str:
+    if abs(d) < 0.005:                      # ≈0 — точное совпадение, маловероятно
+        return _O
+    return _G if d < 0 else _B              # d<0 продали больше (пусто) → 3; d>0 → 1
+
+
+def _match_clubs(rows: dict[str, int], aggc: dict) -> dict[str, dict]:
+    """Клуб чек-листа → значения из агрегата: сначала точное имя, затем алиас
+    по нормализованному названию (без повторного использования строки агрегата)."""
+    used: set[str] = set()
+    match: dict[str, dict] = {}
+    for club in rows:
+        if club in aggc:
+            match[club] = aggc[club]
+            used.add(club)
+    for club in rows:
+        if club in match:
+            continue
+        target = _norm_club(club)
+        for k, v in aggc.items():
+            if k not in used and _norm_club(k) == target:
+                match[club] = v
+                used.add(k)
+                break
+    return match
+
+
+def fill_monitoring(monitoring_bytes: bytes, aggregate_bytes: bytes,
+                    season: str = "25/26") -> bytes:
+    """Заполняет колонку `season` чек-листа значениями билетной программы из
+    агрегата (по клубам), с заливкой по градации. Комиссию не пишет.
+
+    Отклонение записывается градацией 1/2/3 (3 — продали больше/пустые места,
+    2 — ≈0 маловероятно, 1 — протокол превышает билеты).
+    """
+    GRADE = {3: _G, 2: _O, 1: _B}
+    fills = _grade_fill()
+    aggc = parse_aggregate_clubs(aggregate_bytes)
+    wb = openpyxl.load_workbook(BytesIO(monitoring_bytes))   # со стилями
+    ws = _monitor_ws(wb)
+    rows = _club_rows(ws)
+    match = _match_clubs(rows, aggc)
+
+    # (стартовый столбец блока, ключ метрики, вид)
+    plan = [(2, "deviation", "dev"), (10, "online_share", "online"),
+            (18, "price_reg", "price"), (26, "free_share", "free")]
+
+    for club, r in rows.items():
+        m = match.get(club)
+        if not m:
+            continue
+        for col_start, key, kind in plan:
+            idx = _season_index(ws, col_start, season)
+            if idx is None:
+                continue
+            v = m.get(key)
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                continue
+            cell = ws.cell(r, col_start + idx)
+            prev = ws.cell(r, col_start + idx - 1)  # формат берём с прошлого сезона
+            if kind == "dev":
+                label = _dev_grade_label(v)
+                cell.value = {v2: k2 for k2, v2 in GRADE.items()}[label]  # 3/2/1
+            elif kind == "online":
+                cell.value = v
+                cell.number_format = prev.number_format
+                label = _grade_by_value(PARAM_ONLINE, v)
+            elif kind == "free":
+                cell.value = v
+                cell.number_format = prev.number_format
+                label = _grade_by_value(PARAM_FREE, v)
+            else:  # price — цвет по заполняемости (стабильно высокая от 90%)
+                cell.value = v
+                cell.number_format = prev.number_format
+                fill = m.get("fill_reg")
+                label = _O if (isinstance(fill, (int, float)) and fill < 0.90) else _G
+            cell.fill = fills[label]
+
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
