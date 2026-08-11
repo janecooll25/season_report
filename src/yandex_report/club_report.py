@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import unicodedata
 from io import BytesIO
 
 import openpyxl
@@ -292,7 +293,8 @@ def _grade_by_place(place: int, n: int) -> int:
 # «Шанхайские Драконы» — переименованный «Куньлунь Ред Стар» (один клуб): их
 # история в чек-листе ведётся под старым названием.
 def _norm_club(name: str) -> str:
-    n = " ".join(str(name).lower().split())
+    # NFC — чтобы «й» (U+0439) и «и»+combining breve совпадали между файлами
+    n = unicodedata.normalize("NFC", " ".join(str(name).lower().split()))
     # Шанхайские Драконы = Куньлунь Ред Стар (один клуб) — по любому написанию
     if any(k in n for k in ("шанхай", "дракон", "куньлун", "кунлун", "shanghai", "kunlun")):
         return "куньлунь ред стар"
@@ -778,15 +780,23 @@ def _dev_grade_label(d: float) -> str:
 
 
 def _match_clubs(rows: dict[str, int], aggc: dict) -> dict[str, dict]:
-    """Клуб чек-листа → значения из агрегата: сначала точное имя, затем алиас
-    по нормализованному названию (без повторного использования строки агрегата)."""
+    """Клуб чек-листа → значения из агрегата: сначала точное совпадение без учёта
+    регистра/пробелов, затем — по алиасу (Динамо/Шанхай), без повторного
+    использования строки агрегата. Точное совпадение в приоритете, поэтому у пары
+    «Шанхайские Драконы» / «Куньлунь Ред Стар» заполнится тот, кто есть в агрегате
+    (текущее название — Драконы)."""
+    def ci(s: str) -> str:
+        return unicodedata.normalize("NFC", " ".join(str(s).lower().split()))
+
     used: set[str] = set()
     match: dict[str, dict] = {}
-    for club in rows:
-        if club in aggc:
-            match[club] = aggc[club]
-            used.add(club)
-    for club in rows:
+    agg_ci = {ci(k): k for k in aggc}
+    for club in rows:                          # 1) точное совпадение (без регистра)
+        k = agg_ci.get(ci(club))
+        if k and k not in used:
+            match[club] = aggc[k]
+            used.add(k)
+    for club in rows:                          # 2) по алиасу
         if club in match:
             continue
         target = _norm_club(club)

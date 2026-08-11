@@ -169,6 +169,19 @@ def test_fill_monitoring_writes_season_values_and_colors():
     assert isinstance(ws2.cell(7, 25).value, (int, float))
 
 
+def test_match_fills_dragons_not_kunlun():
+    import unicodedata
+
+    from yandex_report.club_report import _match_clubs
+    # в агрегате «й» разложена (NFD), в чек-листе — цельная; должно совпасть,
+    # и заполниться именно «Шанхайские Драконы», а не «Куньлунь Ред Стар»
+    aggc = {unicodedata.normalize("NFD", "Шанхайские Драконы"): {"price_reg": 1056}}
+    rows = {"Куньлунь Ред Стар": 16, "Шанхайские Драконы": 30}
+    m = _match_clubs(rows, aggc)
+    assert "Шанхайские Драконы" in m
+    assert "Куньлунь Ред Стар" not in m
+
+
 def test_list_clubs():
     assert list_clubs(_make_monitoring()) == ["Альфа", "Бета", "Гамма"]
 
