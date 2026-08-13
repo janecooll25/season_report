@@ -157,6 +157,7 @@ _CALC_LABELS = {
     "free_share": "доля бесплатных билетов",
     "commission": "агентская комиссия",
     "deviation": "расхождение факта с заявленным",
+    "fill_reg": "заполняемость арены",             # берём готовой с листа «Расчеты»
 }
 
 
@@ -184,23 +185,7 @@ def read_calc_metrics(input_bytes: bytes, capacity: int | None = None) -> dict |
                 found[key] = float(v)
     if "price_reg" not in found and "income_total" not in found:
         return None                       # лист не посчитан
-    found["fill_reg"] = _protocol_fill(input_bytes, capacity)
     return found
-
-
-def _protocol_fill(input_bytes: bytes, capacity: int | None) -> float | None:
-    """Заполняемость по протоколам: средняя протокольная явка регулярки / вместимость."""
-    try:
-        wb = openpyxl.load_workbook(BytesIO(input_bytes))
-        rz = wb[RZ]
-    except Exception:  # noqa: BLE001
-        return None
-    _coerce_numeric_text(rz)
-    reg, _po = _section_spans(rz)
-    n_reg = reg[1] - reg[0] + 1
-    protocol_reg = _sum_col(rz, 13, reg)
-    cap = capacity or _read_calc_capacity(input_bytes)
-    return (protocol_reg / n_reg / cap) if (n_reg and cap and protocol_reg) else None
 
 
 def _read_calc_capacity(input_bytes: bytes) -> float | None:
