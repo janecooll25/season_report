@@ -149,6 +149,60 @@ def parse_aggregate_clubs(agg_bytes: bytes) -> dict[str, dict[str, float]]:
     return result
 
 
+# Метрики агрегата → подстрока-метка на листе «Расчеты» (первое числовое значение).
+_CALC_LABELS = {
+    "price_reg": "средняя цена платного билета (регулярка)",
+    "income_total": "всего за сезон",              # «Доход — всего за сезон»
+    "online_share": "доля онлайн",
+    "free_share": "доля бесплатных билетов",
+    "commission": "агентская комиссия",
+    "deviation": "расхождение факта с заявленным",
+}
+
+
+def read_calc_metrics(input_bytes: bytes, capacity: int | None = None) -> dict | None:
+    """Метрики клуба, взятые ГОТОВЫМИ с листа «Расчеты» (кэш значений Excel).
+
+    Возвращает None, если листа нет или он не посчитан (нет кэша). Заполняемость
+    считается по протоколам (в «Расчеты» она по билетам)."""
+    try:
+        wb = openpyxl.load_workbook(BytesIO(input_bytes), data_only=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if "Расчеты" not in wb.sheetnames:
+        return None
+    found: dict[str, float] = {}
+    for row in wb["Расчеты"].iter_rows(values_only=True):
+        if len(row) < 3 or not isinstance(row[1], str):
+            continue
+        v = row[2]
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            continue
+        lbl = row[1].strip().lower()
+        for key, sub in _CALC_LABELS.items():
+            if key not in found and sub in lbl:
+                found[key] = float(v)
+    if "price_reg" not in found and "income_total" not in found:
+        return None                       # лист не посчитан
+    found["fill_reg"] = _protocol_fill(input_bytes, capacity)
+    return found
+
+
+def _protocol_fill(input_bytes: bytes, capacity: int | None) -> float | None:
+    """Заполняемость по протоколам: средняя протокольная явка регулярки / вместимость."""
+    try:
+        wb = openpyxl.load_workbook(BytesIO(input_bytes))
+        rz = wb[RZ]
+    except Exception:  # noqa: BLE001
+        return None
+    _coerce_numeric_text(rz)
+    reg, _po = _section_spans(rz)
+    n_reg = reg[1] - reg[0] + 1
+    protocol_reg = _sum_col(rz, 13, reg)
+    cap = capacity or _read_calc_capacity(input_bytes)
+    return (protocol_reg / n_reg / cap) if (n_reg and cap and protocol_reg) else None
+
+
 def _read_calc_capacity(input_bytes: bytes) -> float | None:
     """Вместимость арены с листа «Расчеты» (строка «Вместимость арены»)."""
     try:
@@ -345,7 +399,17 @@ def _compute_all(
         # белорусский клуб — деньги в BYN → переводим в рубли РФ по курсу
         rate = byn_to_rub if (byn_to_rub and _is_belarus(club)) else 1.0
         try:
-            clubs.append((club, compute_club_metrics(data, capacity, to_rub=rate)))
+            # Готовые значения с листа «Расчеты» (если посчитан в Excel),
+            # иначе — считаем сами из исходных листов.
+            m = read_calc_metrics(data, capacity)
+            if m is not None:
+                if rate != 1.0:
+                    for k in ("price_reg", "income_total"):
+                        if isinstance(m.get(k), (int, float)):
+                            m[k] *= rate
+            else:
+                m = compute_club_metrics(data, capacity, to_rub=rate)
+            clubs.append((club, m))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {exc}")
     if not clubs:

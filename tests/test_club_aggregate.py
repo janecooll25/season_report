@@ -111,6 +111,29 @@ def test_byn_rate_applies_only_to_minsk():
     assert conv["Сибирь"]["income_total"] == base["Сибирь"]["income_total"]
 
 
+def test_read_calc_metrics_from_raschety_sheet():
+    from yandex_report.club_aggregate import read_calc_metrics
+    wb = openpyxl.load_workbook(BytesIO(_make_raw()))
+    ws = wb.create_sheet("Расчеты")
+    for i, (lbl, val) in enumerate([
+        ("Средняя цена платного билета (регулярка)", 1000),
+        ("Доля бесплатных билетов", 0.1),
+        ("Доля онлайн-продаж", 0.9),
+        ("Доход — всего за сезон", 5_000_000),
+        ("Агентская комиссия (средняя по агентам)", 0.05),
+        ("Расхождение факта с заявленным, %", -0.02),
+    ], start=1):
+        ws.cell(i, 2, lbl); ws.cell(i, 3, val)
+    buf = BytesIO(); wb.save(buf)
+
+    m = read_calc_metrics(buf.getvalue(), capacity=200)
+    assert m["price_reg"] == 1000 and m["free_share"] == 0.1 and m["online_share"] == 0.9
+    assert m["income_total"] == 5_000_000 and m["commission"] == 0.05
+    assert m["deviation"] == -0.02
+    # без листа «Расчеты» — None (агрегат посчитает сам)
+    assert read_calc_metrics(_make_raw()) is None
+
+
 def test_too_many_files_raises():
     files = [(f"c{i}.xlsx", _make_raw()) for i in range(MAX_CLUBS + 1)]
     with pytest.raises(TicketError):
